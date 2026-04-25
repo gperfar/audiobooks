@@ -72,7 +72,32 @@ export async function updateStoryCoverImage(storyId, coverImageUrl) {
 
   if (!data) {
     throw new Error(
-      'No se pudo guardar la portada. Agrega una politica UPDATE para la tabla stories para que el rol anon pueda actualizar cover_image_url.',
+      'No se pudo guardar la portada. Agrega una política UPDATE para la tabla stories para que el rol anon pueda actualizar cover_image_url.',
+    )
+  }
+
+  return data
+}
+
+export async function updateStoryTitle(storyId, title) {
+  const supabase = requireSupabase()
+
+  const { data, error } = await supabase
+    .from('stories')
+    .update({
+      title,
+    })
+    .eq('id', storyId)
+    .select('id, title')
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  if (!data) {
+    throw new Error(
+      'No se pudo guardar el título. Agrega una política UPDATE para la tabla stories para que el rol anon pueda actualizar title.',
     )
   }
 
@@ -98,11 +123,21 @@ export async function incrementStoryListenCount(storyId, currentCount = 0) {
 
   if (!data) {
     throw new Error(
-      'No se pudo guardar el contador de escuchas. Agrega una politica UPDATE para la tabla stories para que el rol anon pueda actualizar listen_count.',
+      'No se pudo guardar el contador de escuchas. Agrega una política UPDATE para la tabla stories para que el rol anon pueda actualizar listen_count.',
     )
   }
 
   return data
+}
+
+export async function deleteStory(storyId) {
+  const supabase = requireSupabase()
+
+  const { error } = await supabase.from('stories').delete().eq('id', storyId)
+
+  if (error) {
+    throw error
+  }
 }
 
 export async function createSegments(storyId, sentences) {
@@ -231,4 +266,29 @@ export async function saveSegmentsTiming(segments) {
       throw error
     }
   }
+}
+
+export async function updateSegmentText(segmentId, text) {
+  const supabase = requireSupabase()
+
+  const { data, error } = await supabase
+    .from('segments')
+    .update({
+      text,
+    })
+    .eq('id', segmentId)
+    .select('id, text')
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  if (!data) {
+    throw new Error(
+      'No se pudo guardar el texto de la frase. Agrega una política UPDATE para la tabla segments para que el rol anon pueda actualizar text.',
+    )
+  }
+
+  return data
 }

@@ -6,6 +6,7 @@ import {
   uploadAudioFile,
   uploadCoverImage,
 } from '../lib/storyApi.js'
+import { useAdminMode } from '../contexts/useAdminMode.js'
 import { isSupabaseConfigured } from '../lib/supabase.js'
 import { splitStoryIntoSentences } from '../utils/sentenceSplit.js'
 
@@ -18,6 +19,7 @@ const emptyForm = {
 
 export function UploadPage() {
   const navigate = useNavigate()
+  const { isAdminMode } = useAdminMode()
   const [formData, setFormData] = useState(emptyForm)
   const [errorMessage, setErrorMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -26,6 +28,19 @@ export function UploadPage() {
     () => splitStoryIntoSentences(formData.storyText),
     [formData.storyText],
   )
+
+  if (!isAdminMode) {
+    return (
+      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+          Esta sección es solo para administración
+        </h2>
+        <p className="mt-3 text-sm text-slate-600 sm:text-base">
+          Activa el modo admin para subir cuentos nuevos y configurar la biblioteca.
+        </p>
+      </section>
+    )
+  }
 
   function handleTextChange(event) {
     const { name, value } = event.target
@@ -50,7 +65,7 @@ export function UploadPage() {
     setErrorMessage('')
 
     if (!formData.title.trim()) {
-      setErrorMessage('Agrega un titulo antes de subir el cuento.')
+      setErrorMessage('Agrega un título antes de subir el cuento.')
       return
     }
 
@@ -82,7 +97,7 @@ export function UploadPage() {
       setFormData(emptyForm)
       navigate(`/editor/${story.id}`)
     } catch (error) {
-      setErrorMessage(error.message || 'Ocurrio un problema al guardar el cuento.')
+      setErrorMessage(error.message || 'Ocurrió un problema al guardar el cuento.')
     } finally {
       setIsSubmitting(false)
     }
@@ -94,14 +109,14 @@ export function UploadPage() {
         <div className="mb-6">
           <h2 className="text-2xl font-semibold tracking-tight">Subir un nuevo cuento</h2>
           <p className="mt-2 text-sm text-slate-600 sm:text-base">
-            Agrega un titulo, sube el audio y pega el cuento completo. La app
-            separara el texto en frases para sincronizarlo en la siguiente pantalla.
+            Agrega un título, sube el audio y pega el cuento completo. La app
+            separará el texto en frases para sincronizarlo en la siguiente pantalla.
           </p>
         </div>
 
         {!isSupabaseConfigured ? (
           <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Supabase todavia no esta configurado. Agrega `VITE_SUPABASE_URL`,
+            Supabase todavía no está configurado. Agrega `VITE_SUPABASE_URL`,
             `VITE_SUPABASE_ANON_KEY`, y opcionalmente `VITE_SUPABASE_AUDIO_BUCKET`
             y `VITE_SUPABASE_COVER_BUCKET` en tu archivo local `.env` antes de
             enviar subidas.
@@ -116,13 +131,13 @@ export function UploadPage() {
 
         <form className="space-y-6" onSubmit={handleSubmit}>
           <label className="block space-y-2">
-            <span className="text-sm font-medium text-slate-700">Titulo del cuento</span>
+            <span className="text-sm font-medium text-slate-700">Título del cuento</span>
             <input
               type="text"
               name="title"
               value={formData.title}
               onChange={handleTextChange}
-              placeholder="El dragon muy dormilon"
+              placeholder="El dragón muy dormilón"
               className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
             />
           </label>
@@ -151,7 +166,7 @@ export function UploadPage() {
               className="block w-full rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-600 file:mr-4 file:rounded-full file:border-0 file:bg-sky-600 file:px-4 file:py-2 file:font-medium file:text-white hover:file:bg-sky-700"
             />
             <p className="text-xs text-slate-500">
-              Opcional. La portada aparecera en la biblioteca y en el reproductor.
+              Opcional. La portada aparecerá en la biblioteca y en el reproductor.
             </p>
           </label>
 
@@ -162,11 +177,11 @@ export function UploadPage() {
               value={formData.storyText}
               onChange={handleTextChange}
               rows={12}
-              placeholder="Habia una vez un dragon que bostezo. Busco una cueva comoda. Luego encontro la almohada perfecta."
+              placeholder="Había una vez un dragón que bostezó. Buscó una cueva cómoda. Luego encontró la almohada perfecta."
               className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
             />
             <p className="text-xs text-slate-500">
-              Las frases se separan con una expresion regular simple basada en puntuacion.
+              Las frases se separan con una expresión regular simple basada en puntuación.
             </p>
           </label>
 
@@ -183,7 +198,7 @@ export function UploadPage() {
       <aside className="rounded-3xl bg-slate-900 p-5 text-white shadow-sm sm:p-6">
         <h2 className="text-xl font-semibold tracking-tight">Vista previa de frases</h2>
         <p className="mt-2 text-sm text-slate-300">
-          Esta es la lista de segmentos que se creara en Supabase.
+          Esta es la lista de segmentos que se creará en Supabase.
         </p>
 
         <div className="mt-6 rounded-3xl bg-white/8 p-4">

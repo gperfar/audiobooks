@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { StoryCover } from '../components/StoryCover.jsx'
+import { useAdminMode } from '../contexts/useAdminMode.js'
 import { getAllStoriesWithSegmentStats } from '../lib/storyApi.js'
 
 function formatCreatedAt(value) {
@@ -22,6 +23,7 @@ function formatListenCount(value) {
 
 export function HomePage() {
   const navigate = useNavigate()
+  const { isAdminMode } = useAdminMode()
   const [stories, setStories] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
@@ -82,7 +84,7 @@ export function HomePage() {
       <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
         <div className="mx-auto max-w-2xl rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center sm:p-12">
           <h2 className="text-3xl font-semibold tracking-tight text-slate-900">
-            Todavia no hay cuentos
+            Todavía no hay cuentos
           </h2>
           <p className="mt-3 text-sm text-slate-600 sm:text-base">
             Sube tu primer cuento para empezar a sincronizarlo y escucharlo.
@@ -102,24 +104,22 @@ export function HomePage() {
     <section className="space-y-6">
       <div className="flex flex-col gap-4 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:flex-row sm:items-end sm:justify-between sm:p-8">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-600">
-            Biblioteca
-          </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
             Todos los cuentos
           </h2>
           <p className="mt-2 text-sm text-slate-600 sm:text-base">
-            Revisa los cuentos cargados, mira su progreso de sincronizacion y abre
-            el reproductor o el editor.
+            Elige un cuento para escuchar o, si estás en modo admin, para editarlo.
           </p>
         </div>
 
-        <Link
-          to="/upload"
-          className="inline-flex rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800"
-        >
-          Subir cuento
-        </Link>
+        {isAdminMode ? (
+          <Link
+            to="/upload"
+            className="inline-flex rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800"
+          >
+            Subir cuento
+          </Link>
+        ) : null}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -156,20 +156,15 @@ export function HomePage() {
 
                 <span
                   className={[
-                    'rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em]',
-                    story.isSynced
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : 'bg-amber-100 text-amber-700',
+                    'mt-1 inline-flex h-4 w-4 rounded-full',
+                    story.isSynced ? 'bg-emerald-400' : 'bg-slate-300',
                   ].join(' ')}
-                >
-                  {story.isSynced ? 'Sincronizado' : 'Sin sincronizar'}
-                </span>
+                  aria-label={story.isSynced ? 'Sincronizado' : 'Sin sincronizar'}
+                  title={story.isSynced ? 'Sincronizado' : 'Sin sincronizar'}
+                />
               </div>
 
               <div className="mt-5 flex flex-wrap gap-2 text-sm text-slate-600">
-                <span className="rounded-full bg-slate-100 px-3 py-2 font-medium">
-                  {story.syncedSegments} / {story.totalSegments} frases sincronizadas
-                </span>
                 <span className="rounded-full bg-slate-100 px-3 py-2 font-medium">
                   {formatListenCount(story.listen_count)}
                 </span>
@@ -183,13 +178,15 @@ export function HomePage() {
                 >
                   Escuchar
                 </Link>
-                <Link
-                  to={`/editor/${story.id}`}
-                  onClick={(event) => event.stopPropagation()}
-                  className="inline-flex min-w-28 items-center justify-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-                >
-                  Editar
-                </Link>
+                {isAdminMode ? (
+                  <Link
+                    to={`/editor/${story.id}`}
+                    onClick={(event) => event.stopPropagation()}
+                    className="inline-flex min-w-28 items-center justify-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+                  >
+                    Editar
+                  </Link>
+                ) : null}
               </div>
             </div>
           </article>

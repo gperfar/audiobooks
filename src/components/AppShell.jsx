@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
+import { useAdminMode } from '../contexts/useAdminMode.js'
 
 const navLinkClassName = ({ isActive }) =>
   [
@@ -9,9 +10,41 @@ const navLinkClassName = ({ isActive }) =>
       : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:text-slate-900',
   ].join(' ')
 
+function AdminModeToggle({ isAdminMode, toggleAdminMode }) {
+  return (
+    <button
+      type="button"
+      onClick={toggleAdminMode}
+      aria-pressed={isAdminMode}
+      className={[
+        'inline-flex items-center gap-3 rounded-full px-3 py-2 text-sm font-medium shadow-sm ring-1 transition',
+        isAdminMode
+          ? 'bg-slate-900 text-white ring-slate-900'
+          : 'bg-white text-slate-700 ring-slate-200 hover:text-slate-900',
+      ].join(' ')}
+    >
+      <span>{isAdminMode ? 'Modo admin' : 'Modo lectura'}</span>
+      <span
+        className={[
+          'relative inline-flex h-6 w-11 rounded-full transition',
+          isAdminMode ? 'bg-white/25' : 'bg-slate-200',
+        ].join(' ')}
+      >
+        <span
+          className={[
+            'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform',
+            isAdminMode ? 'translate-x-5' : 'translate-x-0.5',
+          ].join(' ')}
+        />
+      </span>
+    </button>
+  )
+}
+
 export function AppShell({ children }) {
   const location = useLocation()
   const isPlayerRoute = location.pathname.startsWith('/player/')
+  const { isAdminMode, toggleAdminMode } = useAdminMode()
 
   useEffect(() => {
     document.title = 'Audiolibros de Aurora'
@@ -33,6 +66,10 @@ export function AppShell({ children }) {
             >
               Audiolibros de Aurora
             </Link>
+            <AdminModeToggle
+              isAdminMode={isAdminMode}
+              toggleAdminMode={toggleAdminMode}
+            />
           </div>
         ) : (
           <header className="mb-8 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-6">
@@ -46,8 +83,8 @@ export function AppShell({ children }) {
                     Cuentos para leer y escuchar
                   </h1>
                   <p className="mt-2 max-w-2xl text-sm text-slate-600 sm:text-base">
-                    Sube un cuento, separa el texto por frases y sincronizalo con
-                    el audio para acompanar la lectura.
+                    Sube un cuento, separa el texto por frases y sincronízalo con
+                    el audio para acompañar la lectura.
                   </p>
                 </div>
               </div>
@@ -56,9 +93,15 @@ export function AppShell({ children }) {
                 <NavLink to="/" className={navLinkClassName}>
                   Inicio
                 </NavLink>
-                <NavLink to="/upload" className={navLinkClassName}>
-                  Subir cuento
-                </NavLink>
+                {isAdminMode ? (
+                  <NavLink to="/upload" className={navLinkClassName}>
+                    Subir cuento
+                  </NavLink>
+                ) : null}
+                <AdminModeToggle
+                  isAdminMode={isAdminMode}
+                  toggleAdminMode={toggleAdminMode}
+                />
               </nav>
             </div>
           </header>

@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Howl } from 'howler'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { StoryCover } from '../components/StoryCover.jsx'
+import { useAdminMode } from '../contexts/useAdminMode.js'
 import {
+  deleteStory,
   fetchStoryWithSegments,
   saveSegmentsTiming,
+  updateSegmentText,
   updateStoryCoverImage,
+  updateStoryTitle,
   uploadCoverImage,
 } from '../lib/storyApi.js'
 import {
@@ -26,6 +30,8 @@ function formatTime(value) {
 
 export function EditorPage() {
   const { storyId } = useParams()
+  const navigate = useNavigate()
+  const { isAdminMode } = useAdminMode()
   const soundRef = useRef(null)
   const animationFrameRef = useRef(null)
   const segmentRefs = useRef({})
@@ -41,6 +47,10 @@ export function EditorPage() {
   const [saveMessage, setSaveMessage] = useState('')
   const [selectedSegmentId, setSelectedSegmentId] = useState(null)
   const [coverImageFile, setCoverImageFile] = useState(null)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [isSavingTitle, setIsSavingTitle] = useState(false)
+  const [isDeletingStory, setIsDeletingStory] = useState(false)
+  const [editingSegmentId, setEditingSegmentId] = useState(null)
 
   const activeSegment = useMemo(
     () => findActiveSegment(segments, currentTime),
@@ -63,6 +73,7 @@ export function EditorPage() {
 
         setStory(data)
         setSegments(data.segments)
+        setTitleDraft(data.title ?? '')
       } catch (error) {
         if (isMounted) {
           setErrorMessage(error.message || 'No se pudo cargar el editor del cuento.')
@@ -228,6 +239,94 @@ export function EditorPage() {
     setSaveMessage('')
   }
 
+  async function handleTitleSave() {
+    const trimmedTitle = titleDraft.trim()
+
+    if (!trimmedTitle || !storyId) {
+      setErrorMessage('Agrega un título válido antes de guardar.')
+      return
+    }
+
+    setIsSavingTitle(true)
+    setErrorMessage('')
+    setSaveMessage('')
+
+    try {
+      const updatedStory = await updateStoryTitle(storyId, trimmedTitle)
+      setStory((currentStory) => ({
+        ...currentStory,
+        ...updatedStory,
+        segments: currentStory?.segments ?? [],
+      }))
+      setTitleDraft(updatedStory.title)
+      setSaveMessage('Título actualizado.')
+    } catch (error) {
+      setErrorMessage(error.message || 'No se pudo actualizar el título.')
+    } finally {
+      setIsSavingTitle(false)
+    }
+  }
+
+  async function handleDeleteStory() {
+    if (!storyId) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      '¿Seguro que quieres borrar este cuento? Esta acción no se puede deshacer.',
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setIsDeletingStory(true)
+    setErrorMessage('')
+    setSaveMessage('')
+
+    try {
+      await deleteStory(storyId)
+      navigate('/')
+    } catch (error) {
+      setErrorMessage(error.message || 'No se pudo borrar el cuento.')
+    } finally {
+      setIsDeletingStory(false)
+    }
+  }
+
+  function handleSegmentTextChange(index, value) {
+    setSegments((currentSegments) =>
+      currentSegments.map((segment, currentIndex) =>
+        currentIndex === index ? { ...segment, text: value } : segment,
+      ),
+    )
+  }
+
+  async function handleSegmentTextSave(segmentId, text) {
+    const trimmedText = text.trim()
+
+    if (!trimmedText) {
+      setErrorMessage('El texto de la frase no puede quedar vacío.')
+      return
+    }
+
+    setErrorMessage('')
+    setSaveMessage('')
+
+    try {
+      const updatedSegment = await updateSegmentText(segmentId, trimmedText)
+      setSegments((currentSegments) =>
+        currentSegments.map((segment) =>
+          segment.id === segmentId ? { ...segment, ...updatedSegment } : segment,
+        ),
+      )
+      setEditingSegmentId(null)
+      setSaveMessage('Texto de la frase actualizado.')
+    } catch (error) {
+      setErrorMessage(error.message || 'No se pudo actualizar la frase.')
+    }
+  }
+
   async function handleCoverImageSave() {
     if (!coverImageFile || !storyId) {
       return
@@ -286,29 +385,70 @@ export function EditorPage() {
     )
   }
 
-  return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)]">
+  if (!isAdminMode) {
+    return (
       <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-600">
-          Editor de sincronizacion
-        </p>
-        <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
-          {story?.title}
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+          El editor solo está disponible en modo admin
         </h2>
         <p className="mt-3 text-sm text-slate-600 sm:text-base">
+          Activa el modo admin para editar cuentos, frases y configuraciones.
+        </p>
+      </section>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
+        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-600">
+          Editor de sincronización
+        </p>
+        <div className="mt-4 space-y-3">
+          <label className="block space-y-2">
+            <span className="text-sm font-medium text-slate-700">Título del cuento</span>
+            <input
+              type="text"
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+            />
+          </label>
+
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={handleTitleSave}
+              disabled={isSavingTitle}
+              className="inline-flex rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {isSavingTitle ? 'Guardando título...' : 'Guardar título'}
+            </button>
+            <button
+              type="button"
+              onClick={handleDeleteStory}
+              disabled={isDeletingStory}
+              className="inline-flex rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-rose-300"
+            >
+              {isDeletingStory ? 'Borrando...' : 'Borrar cuento'}
+            </button>
+          </div>
+        </div>
+
+        <p className="mt-5 text-sm text-slate-600 sm:text-base">
           Reproduce el audio y haz clic en cada frase cuando empiece. La frase
-          anterior se cerrara automaticamente en ese mismo instante.
+          anterior se cerrará automáticamente en ese mismo instante.
         </p>
 
-        <div className="mt-6 rounded-3xl bg-slate-50 p-5 ring-1 ring-slate-200">
-          <div className="flex flex-col gap-5 md:flex-row md:items-start">
+        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
+          <div className="rounded-3xl bg-slate-50 p-5 ring-1 ring-slate-200">
             <StoryCover
               src={story?.cover_image_url}
               title={story?.title}
-              className="h-48 w-full rounded-3xl md:w-52"
+              className="h-56 w-full rounded-3xl"
             />
 
-            <div className="flex-1">
+            <div className="mt-5">
               <h3 className="text-lg font-semibold tracking-tight text-slate-900">
                 Portada del cuento
               </h3>
@@ -343,59 +483,59 @@ export function EditorPage() {
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="mt-6 rounded-3xl bg-slate-50 p-5 ring-1 ring-slate-200">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-slate-600">Tiempo actual</p>
-              <p className="mt-1 text-3xl font-semibold tracking-tight text-slate-900">
-                {formatTime(currentTime)}
+          <div className="rounded-3xl bg-slate-50 p-5 ring-1 ring-slate-200">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-600">Tiempo actual</p>
+                <p className="mt-1 text-3xl font-semibold tracking-tight text-slate-900">
+                  {formatTime(currentTime)}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={togglePlayback}
+                className="inline-flex min-w-32 items-center justify-center rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800"
+              >
+                {isPlaying ? 'Pausar audio' : 'Reproducir audio'}
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-2xl bg-white p-4 text-sm text-slate-600 ring-1 ring-slate-200">
+              <p>
+                Frase activa:{' '}
+                <span className="font-medium text-slate-900">
+                  {activeSegment?.text || 'Todavía no hay una frase que coincida con el tiempo actual.'}
+                </span>
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={togglePlayback}
-              className="inline-flex min-w-32 items-center justify-center rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800"
-            >
-              {isPlaying ? 'Pausar audio' : 'Reproducir audio'}
-            </button>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="inline-flex rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-violet-300"
+              >
+                {isSaving ? 'Guardando...' : 'Guardar tiempos'}
+              </button>
+
+              <Link
+                to={`/player/${storyId}`}
+                className="inline-flex rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+              >
+                Abrir reproductor
+              </Link>
+
+              <Link
+                to="/"
+                className="inline-flex rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+              >
+                Volver a la biblioteca
+              </Link>
+            </div>
           </div>
-
-          <div className="mt-5 rounded-2xl bg-white p-4 text-sm text-slate-600 ring-1 ring-slate-200">
-            <p>
-              Frase activa:{' '}
-              <span className="font-medium text-slate-900">
-                {activeSegment?.text || 'Todavia no hay una frase que coincida con el tiempo actual.'}
-              </span>
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-6 flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving}
-            className="inline-flex rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-violet-300"
-          >
-            {isSaving ? 'Guardando...' : 'Guardar tiempos'}
-          </button>
-
-          <Link
-            to={`/player/${storyId}`}
-            className="inline-flex rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-          >
-            Abrir reproductor
-          </Link>
-
-          <Link
-            to="/"
-            className="inline-flex rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-          >
-            Volver a la biblioteca
-          </Link>
         </div>
 
         {errorMessage ? (
@@ -455,7 +595,55 @@ export function EditorPage() {
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">
                       Segmento {index + 1}
                     </p>
-                    <p className="mt-2 text-lg leading-8 text-slate-900">{segment.text}</p>
+                    {editingSegmentId === segment.id ? (
+                      <div className="mt-2 space-y-3">
+                        <textarea
+                          value={segment.text}
+                          onChange={(event) =>
+                            handleSegmentTextChange(index, event.target.value)
+                          }
+                          rows={3}
+                          onClick={(event) => event.stopPropagation()}
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base leading-7 text-slate-900 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleSegmentTextSave(segment.id, segment.text)
+                            }}
+                            className="inline-flex rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                          >
+                            Guardar texto
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setEditingSegmentId(null)
+                            }}
+                            className="inline-flex rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 space-y-3">
+                        <p className="text-lg leading-8 text-slate-900">{segment.text}</p>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setEditingSegmentId(segment.id)
+                          }}
+                          className="inline-flex rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+                        >
+                          Editar texto
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="min-w-40 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">

@@ -1,111 +1,143 @@
-# Synced Audiobooks MVP
+# Audiolibros de Aurora
 
-A simple web app for creating read-along audiobooks for children.
+Aplicacion web sencilla para crear una biblioteca de cuentos con audio, sincronizar frases y ofrecer una experiencia de escucha y lectura para ninas y ninos.
 
-The current MVP lets you:
+## Que hace hoy la app
 
-- browse a library of uploaded stories
-- upload a story title, audio file, optional cover image, and full story text
-- split the story into sentence-based segments
-- open a sync editor for assigning sentence timestamps while audio plays
-- play a synced story with highlighted read-along text
-- save segment timing back to Supabase
+- muestra una biblioteca de cuentos cargados
+- permite alternar entre `modo lectura` y `modo admin`
+- deja subir cuentos con audio, texto y portada opcional
+- separa el cuento en frases automaticamente
+- permite sincronizar cada frase con el audio
+- permite editar titulo, portada y texto de segmentos
+- permite borrar cuentos
+- reproduce el cuento con texto destacado y desplazamiento automatico
+- guarda cuantas veces se escucho cada cuento
 
-## Tech Stack
+## Stack tecnico
 
 - React + Vite
 - Tailwind CSS
 - React Router
-- Howler.js for audio playback
-- Supabase for database and storage
+- Howler.js
+- Supabase Database + Storage
 
-## Current App Flow
+## Modos de uso
 
-### 1. Library page: `/`
+### Modo lectura
 
-The home page shows all uploaded stories and their sync status.
+Pensado para la experiencia del nino o la nina que escucha el cuento.
 
-Each story card includes:
+- muestra la biblioteca
+- permite entrar al reproductor
+- oculta opciones de administracion
+- en el reproductor no muestra el acceso a editar
 
-- title
-- cover image with fallback placeholder
-- created date
-- whether the story is fully synced
-- synced progress like `3 / 5 segments synced`
-- quick actions to open the player or editor
+### Modo admin
 
-If there are no stories yet, the page shows an empty state with a link to upload the first story.
+Pensado para gestionar el contenido.
 
-### 2. Upload page: `/upload`
+- muestra el acceso a subir cuentos
+- habilita el editor
+- permite cambiar titulo y portada
+- permite editar el texto de las frases
+- permite borrar cuentos
 
-Use the upload form to:
+El estado del modo se guarda en `localStorage`.
 
-- enter a story title
-- upload a single audio file
-- optionally upload a cover image
-- paste the full story text
+## Rutas principales
 
-On submit, the app:
+- `/`: biblioteca
+- `/upload`: carga de cuentos, solo visible en modo admin
+- `/editor/:storyId`: editor de sincronizacion, solo util en modo admin
+- `/player/:storyId`: reproductor de lectura y audio
 
-1. uploads the audio file to Supabase Storage
-2. optionally uploads the cover image to Supabase Storage
-3. creates a row in the `stories` table
-4. splits the story text into sentences
-5. creates one row per sentence in the `segments` table
-6. redirects to the sync editor
+## Flujo actual
 
-### 3. Sync editor: `/editor/:storyId`
+### 1. Biblioteca: `/`
 
-The editor currently supports:
+La pagina principal muestra las tarjetas de cuentos.
 
-- loading a story and its segments from Supabase
-- audio play / pause via Howler
-- live playback time tracking
-- clicking a segment while audio is playing to assign `start_time`
-- automatically setting the previous segment's `end_time`
-- active segment highlighting during playback
-- manual editing of `start_time`
-- saving segment timings back to Supabase
+Cada tarjeta puede incluir:
 
-### 4. Player page: `/player/:storyId`
+- portada
+- titulo
+- fecha
+- indicador de sincronizacion con punto verde o gris
+- contador de escuchas
+- boton `Escuchar`
+- boton `Editar` solo en modo admin
 
-The player currently supports:
+### 2. Carga: `/upload`
 
-- loading a story and its synced segments from Supabase
-- displaying the story cover image at the top with a fallback placeholder
-- audio play / pause via Howler
-- active sentence highlighting during playback
-- smooth auto-scroll to the active sentence
-- hiding unsynced segments from the reader view
-- showing a "This story is not synced yet" message when timing is missing
-- restart control
-- last playback position persistence in `localStorage`
+Desde modo admin puedes:
 
-## Requirements
+- escribir el titulo
+- subir el audio
+- subir una portada opcional
+- pegar el texto completo del cuento
 
-Before running the app, make sure you have:
+Al enviar el formulario, la app:
 
-- Node.js 20+ recommended
+1. sube el audio a Supabase Storage
+2. sube la portada si existe
+3. crea la fila en `stories`
+4. separa el texto en frases
+5. crea los registros en `segments`
+6. redirige al editor
+
+### 3. Editor: `/editor/:storyId`
+
+El editor permite:
+
+- reproducir o pausar el audio
+- ver el tiempo actual
+- hacer clic en una frase para marcar su `start_time`
+- cerrar automaticamente la frase anterior con `end_time`
+- editar manualmente el `start_time`
+- editar el texto de cada segmento
+- cambiar el titulo
+- cambiar la portada
+- borrar el cuento
+- guardar los tiempos
+
+### 4. Reproductor: `/player/:storyId`
+
+El reproductor ofrece una experiencia tipo cuento:
+
+- portada del cuento
+- texto grande y centrado
+- frase activa destacada
+- desplazamiento automatico
+- boton grande fijo para reproducir o pausar
+- enlace de vuelta a la biblioteca
+- acceso a `Editar` solo en modo admin
+- contador de escuchas
+- reanudacion basica de posicion con `localStorage`
+
+## Requisitos
+
+Antes de ejecutar el proyecto necesitas:
+
+- Node.js 20+ recomendado
 - npm
-- a Supabase project
+- un proyecto de Supabase
 
-## Local Setup
+## Configuracion local
 
-### 1. Install dependencies
+### 1. Instalar dependencias
 
 ```bash
 npm install
 ```
 
-### 2. Create your env file
-
-Copy `.env.example` to `.env`:
+### 2. Crear `.env`
 
 ```bash
 cp .env.example .env
 ```
 
-Then fill in your Supabase values:
+Contenido esperado:
 
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
@@ -114,30 +146,33 @@ VITE_SUPABASE_AUDIO_BUCKET=story-audio
 VITE_SUPABASE_COVER_BUCKET=story-covers
 ```
 
-Notes:
+Notas:
 
-- `VITE_SUPABASE_AUDIO_BUCKET` defaults to `story-audio` if omitted.
-- `VITE_SUPABASE_COVER_BUCKET` defaults to `story-covers` if omitted.
-- the app expects a public bucket, because uploaded audio is loaded through a public URL
-- the cover image bucket should also be public so the UI can render images directly by URL
+- `VITE_SUPABASE_AUDIO_BUCKET` usa `story-audio` por defecto
+- `VITE_SUPABASE_COVER_BUCKET` usa `story-covers` por defecto
+- ambos buckets deben ser publicos para que el navegador pueda cargar audio e imagenes por URL
 
-## Supabase Setup
+## Configuracion de Supabase
 
-You need:
+Necesitas:
 
-- storage buckets for audio files and optional cover images
-- two tables: `stories` and `segments`
+- bucket de audio
+- bucket de portadas
+- tabla `stories`
+- tabla `segments`
 
-### Storage buckets
+### Buckets de Storage
 
-Create a bucket named `story-audio` or match whatever you set in `VITE_SUPABASE_AUDIO_BUCKET`.
-Create a bucket named `story-covers` or match whatever you set in `VITE_SUPABASE_COVER_BUCKET`.
+Crea estos buckets o usa los nombres configurados en `.env`:
 
-For the current MVP, make both buckets public so the browser can load audio and cover images by URL.
+- `story-audio`
+- `story-covers`
 
-### Database schema
+Para este MVP, ambos deben ser publicos.
 
-Run this SQL in Supabase SQL Editor:
+## SQL completo recomendado
+
+Ejecuta este bloque en el SQL Editor de Supabase para dejar la base y las policies listas para el estado actual de la app:
 
 ```sql
 create extension if not exists "pgcrypto";
@@ -147,6 +182,7 @@ create table if not exists stories (
   title text not null,
   audio_url text not null,
   cover_image_url text,
+  listen_count integer not null default 0,
   created_at timestamptz not null default now()
 );
 
@@ -159,69 +195,178 @@ create table if not exists segments (
   "order" integer not null
 );
 
+alter table stories add column if not exists cover_image_url text;
+alter table stories add column if not exists listen_count integer not null default 0;
+
 create index if not exists segments_story_id_order_idx
   on segments (story_id, "order");
+
+alter table stories enable row level security;
+alter table segments enable row level security;
+
+drop policy if exists "anon can read stories" on stories;
+create policy "anon can read stories"
+on stories
+for select
+to anon
+using (true);
+
+drop policy if exists "anon can insert stories" on stories;
+create policy "anon can insert stories"
+on stories
+for insert
+to anon
+with check (true);
+
+drop policy if exists "anon can update stories" on stories;
+create policy "anon can update stories"
+on stories
+for update
+to anon
+using (true)
+with check (true);
+
+drop policy if exists "anon can delete stories" on stories;
+create policy "anon can delete stories"
+on stories
+for delete
+to anon
+using (true);
+
+drop policy if exists "anon can read segments" on segments;
+create policy "anon can read segments"
+on segments
+for select
+to anon
+using (true);
+
+drop policy if exists "anon can insert segments" on segments;
+create policy "anon can insert segments"
+on segments
+for insert
+to anon
+with check (true);
+
+drop policy if exists "anon can update segments" on segments;
+create policy "anon can update segments"
+on segments
+for update
+to anon
+using (true)
+with check (true);
+
+drop policy if exists "anon can delete segments" on segments;
+create policy "anon can delete segments"
+on segments
+for delete
+to anon
+using (true);
+
+drop policy if exists "anon can read story audio" on storage.objects;
+create policy "anon can read story audio"
+on storage.objects
+for select
+to anon
+using (bucket_id = 'story-audio');
+
+drop policy if exists "anon can upload story audio" on storage.objects;
+create policy "anon can upload story audio"
+on storage.objects
+for insert
+to anon
+with check (bucket_id = 'story-audio');
+
+drop policy if exists "anon can update story audio" on storage.objects;
+create policy "anon can update story audio"
+on storage.objects
+for update
+to anon
+using (bucket_id = 'story-audio')
+with check (bucket_id = 'story-audio');
+
+drop policy if exists "anon can delete story audio" on storage.objects;
+create policy "anon can delete story audio"
+on storage.objects
+for delete
+to anon
+using (bucket_id = 'story-audio');
+
+drop policy if exists "anon can read story covers" on storage.objects;
+create policy "anon can read story covers"
+on storage.objects
+for select
+to anon
+using (bucket_id = 'story-covers');
+
+drop policy if exists "anon can upload story covers" on storage.objects;
+create policy "anon can upload story covers"
+on storage.objects
+for insert
+to anon
+with check (bucket_id = 'story-covers');
+
+drop policy if exists "anon can update story covers" on storage.objects;
+create policy "anon can update story covers"
+on storage.objects
+for update
+to anon
+using (bucket_id = 'story-covers')
+with check (bucket_id = 'story-covers');
+
+drop policy if exists "anon can delete story covers" on storage.objects;
+create policy "anon can delete story covers"
+on storage.objects
+for delete
+to anon
+using (bucket_id = 'story-covers');
 ```
 
-### Supabase policies
-
-This app does not use authentication. For a quick local MVP, you can allow public access to the relevant tables and storage bucket.
-
-If you use Row Level Security, make sure anonymous users can:
-
-- insert into `stories`
-- insert, update, and read `segments`
-- read `stories`
-- upload to and read from the audio storage bucket
-- upload to and read from the cover image storage bucket
-
-If you prefer speed over strict security while prototyping, you can temporarily disable RLS for these tables in your dev project.
-
-## Running the App
-
-Start the development server:
+## Ejecutar la app
 
 ```bash
 npm run dev
 ```
 
-Then open the local URL shown by Vite, usually:
+Luego abre la URL local de Vite, normalmente:
 
 [`http://localhost:5173`](http://localhost:5173)
 
-## Available Scripts
+## Scripts disponibles
 
 ```bash
 npm run dev
 ```
 
-Starts the local development server.
+Inicia el servidor de desarrollo.
 
 ```bash
 npm run build
 ```
 
-Builds the production bundle into `dist/`.
+Genera la build de produccion en `dist/`.
 
 ```bash
 npm run preview
 ```
 
-Serves the production build locally.
+Sirve localmente la build de produccion.
 
 ```bash
 npm run lint
 ```
 
-Runs ESLint.
+Ejecuta ESLint.
 
-## Project Structure
+## Estructura del proyecto
 
 ```text
 src/
   components/
     AppShell.jsx
     StoryCover.jsx
+  contexts/
+    AdminModeContext.jsx
+    useAdminMode.js
   lib/
     storyApi.js
     supabase.js
@@ -237,131 +382,109 @@ src/
   main.jsx
 ```
 
-## Important Implementation Notes
+## Notas de implementacion
 
-### Sentence splitting
+### Separacion en frases
 
-The MVP uses a simple regex-based sentence splitter. It is intentionally basic and splits on `.`, `!`, and `?`.
+La app usa una separacion basica por `.`, `!` y `?`.
 
-### Audio playback
+### Audio
 
-The editor and player both use Howler and poll playback position with `requestAnimationFrame`.
+Editor y reproductor usan Howler y actualizan el tiempo con `requestAnimationFrame`.
 
-### Timing logic
+### Logica de sincronizacion
 
-The editor assumes segments are sequential:
+Se asume flujo secuencial:
 
-- clicking segment `N` sets `segment[N].start_time`
-- it also sets `segment[N - 1].end_time` to the same value
-- an active segment is any segment where:
+- hacer clic en la frase `N` define `start_time`
+- la frase `N - 1` recibe el mismo tiempo como `end_time`
+- una frase activa cumple:
   - `start_time <= currentTime < end_time`
-  - if `end_time` is `null`, it is treated as open-ended
+  - si `end_time` es `null`, se trata como infinito
 
-### Saving
+### Guardado
 
-Saving is currently done with a simple loop that updates each segment row individually. This is fine for the MVP.
+Los tiempos de segmentos se guardan con un loop simple de updates. Para este MVP es suficiente.
 
-## How To Use The Current MVP
+### Contador de escuchas
 
-1. Start the dev server with `npm run dev`
-2. Open the app in your browser
-3. From the library page, go to `/upload`
-4. Upload a story title, audio file, optional cover image, and story text
-5. Submit the form to create the story and segments
-6. On the editor page, press play
-7. Click each sentence when that sentence starts in the audio
-8. Adjust any `start_time` manually if needed
-9. Click `Save timings`
-10. Open the player to verify the story highlights in sync
+El reproductor incrementa `listen_count` al iniciar reproduccion por primera vez en esa sesion de visita a la pagina.
 
-## Troubleshooting
+## Uso sugerido
 
-### "Supabase is not configured"
+1. Inicia la app con `npm run dev`
+2. Activa `Modo admin`
+3. Ve a `Subir cuento`
+4. Carga titulo, audio, portada opcional y texto
+5. Guarda el cuento
+6. Entra al editor y sincroniza frases
+7. Corrige texto o titulo si hace falta
+8. Guarda los tiempos
+9. Cambia a `Modo lectura`
+10. Abre el reproductor y prueba la experiencia final
 
-Make sure your `.env` file exists and contains:
+## Solucion de problemas
+
+### "Supabase no esta configurado"
+
+Verifica que `.env` exista y tenga:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 
-Then restart the Vite dev server.
+Luego reinicia el servidor de desarrollo.
 
-### Upload works, but audio will not play
+### Error de RLS al insertar o actualizar
 
-Check:
+Suele significar que:
 
-- the storage bucket is public
-- `audio_url` points to a valid public file
-- the uploaded file format is supported by the browser
+- faltan tablas o columnas
+- faltan policies
+- el rol `anon` no tiene permiso sobre `stories`, `segments` o `storage.objects`
 
-### Cover image does not appear
+Usa el bloque SQL completo de esta documentacion.
 
-Check:
+### La portada no aparece
 
-- the `stories.cover_image_url` column exists
-- the cover image bucket is public
-- `VITE_SUPABASE_COVER_BUCKET` matches the actual Supabase bucket name
-- the image file uploaded successfully and the saved URL is valid
+Revisa:
 
-### Inserts or updates fail
+- que exista `stories.cover_image_url`
+- que `story-covers` sea publico
+- que `VITE_SUPABASE_COVER_BUCKET` coincida con el nombre real del bucket
 
-Usually this means one of:
+### No puedo guardar titulo, portada, texto o escuchas
 
-- the database tables do not exist yet
-- RLS / policies are blocking anonymous access
-- the bucket name in `.env` does not match the actual Supabase bucket
+Eso casi siempre indica que falta una policy `UPDATE` en `stories` o `segments`.
 
-### "new row violates row-level security policy"
+### No puedo borrar cuentos
 
-Your Supabase project is accepting requests, but Postgres is blocking anonymous inserts or updates.
+Agrega policy `DELETE` para `stories`. Como `segments.story_id` usa `on delete cascade`, al borrar un cuento se borran tambien sus segmentos.
 
-This app runs in the browser with the low-privilege client key, so your Supabase policies must allow the `anon` role to:
+### El reproductor no muestra texto destacado
 
-- read `stories`
-- insert into `stories`
-- read `segments`
-- insert into `segments`
-- update `segments`
-- upload and read from the storage bucket
+Comprueba:
 
-For quick MVP development, you can either add permissive RLS policies or temporarily disable RLS on the app tables in your dev project.
+- que existan `start_time` en los segmentos
+- que hayas guardado los tiempos desde el editor
 
-### "JWS Protected Header is invalid"
+## Estado actual
 
-This usually means the Supabase key in `.env` is invalid or pasted incorrectly.
+Implementado:
 
-Check that:
+- biblioteca de cuentos
+- modo lectura y modo admin
+- subida de cuentos
+- subida y edicion de portada
+- edicion de titulo
+- borrado de cuentos
+- separacion de frases
+- sincronizacion de segmentos
+- edicion de texto de segmentos
+- reproductor con experiencia de lectura
+- contador de escuchas
+- persistencia basica de posicion
 
-- `VITE_SUPABASE_URL` matches your project URL
-- `VITE_SUPABASE_ANON_KEY` contains a valid client-side key copied from Supabase
-- you restarted the dev server after editing `.env`
+No implementado:
 
-### The player page looks empty or shows no highlighted text
-
-Usually this means the story has not been synced yet.
-
-Check that:
-
-- the story has segments with `start_time`
-- you clicked `Save timings` in the editor
-- your `segments` table updates are allowed by RLS
-
-## Status
-
-Implemented:
-
-- home / library page
-- upload page
-- optional cover image upload
-- sentence splitting
-- Supabase storage upload
-- Supabase story + segment creation
-- sync editor with timestamp assignment
-- manual start time editing
-- timing save back to Supabase
-- read-along player
-- playback position persistence
-- cover images in library and player
-
-Not implemented yet:
-
-- image editing / cropping
+- recorte o edicion avanzada de imagenes
+- autenticacion

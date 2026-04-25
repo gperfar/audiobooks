@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Howl } from 'howler'
 import { Link, useParams } from 'react-router-dom'
 import { StoryCover } from '../components/StoryCover.jsx'
+import { useAdminMode } from '../contexts/useAdminMode.js'
 import {
   fetchStoryWithSegments,
   incrementStoryListenCount,
@@ -49,6 +50,7 @@ function formatListenCount(value) {
 
 export function PlayerPage() {
   const { storyId } = useParams()
+  const { isAdminMode } = useAdminMode()
   const soundRef = useRef(null)
   const animationFrameRef = useRef(null)
   const segmentRefs = useRef({})
@@ -243,7 +245,7 @@ export function PlayerPage() {
       savePlaybackPosition(storyId, 0)
     }
 
-     if (!hasCountedListenRef.current && storyId) {
+    if (!hasCountedListenRef.current && storyId) {
       hasCountedListenRef.current = true
       const currentListenCount = Number(story?.listen_count) || 0
 
@@ -312,14 +314,16 @@ export function PlayerPage() {
             <span>{formatListenCount(story?.listen_count)}</span>
           </div>
 
-          <div className="mt-5">
-            <Link
-              to={storyId ? `/editor/${storyId}` : '/'}
-              className="inline-flex rounded-full bg-white/80 px-4 py-2 text-sm font-medium text-slate-600 shadow-sm ring-1 ring-slate-200 backdrop-blur transition hover:text-slate-900"
-            >
-              Editar
-            </Link>
-          </div>
+          {isAdminMode ? (
+            <div className="mt-5">
+              <Link
+                to={storyId ? `/editor/${storyId}` : '/'}
+                className="inline-flex rounded-full bg-white/80 px-4 py-2 text-sm font-medium text-slate-600 shadow-sm ring-1 ring-slate-200 backdrop-blur transition hover:text-slate-900"
+              >
+                Editar
+              </Link>
+            </div>
+          ) : null}
 
           {errorMessage ? (
             <div className="mt-5 rounded-3xl border border-rose-200 bg-rose-50/90 p-4 text-sm text-rose-700 shadow-sm">
@@ -332,7 +336,7 @@ export function PlayerPage() {
           {syncedSegments.length === 0 ? (
             <div className="w-full max-w-2xl rounded-[2rem] bg-white/80 p-10 text-center shadow-sm ring-1 ring-amber-100 backdrop-blur">
               <p className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-                Este cuento todavia no esta sincronizado
+                Este cuento todavía no está sincronizado
               </p>
               <p className="mt-4 text-base leading-8 text-slate-600 sm:text-lg">
                 Agrega tiempos en el editor antes de usar el reproductor.
@@ -342,7 +346,7 @@ export function PlayerPage() {
             <div className="w-full max-w-3xl space-y-7 sm:space-y-9">
               {segments.length !== syncedSegments.length ? (
                 <p className="text-center text-sm text-slate-500">
-                  Aqui solo se muestran las frases que ya tienen tiempo guardado.
+                  Aquí solo se muestran las frases que ya tienen tiempo guardado.
                 </p>
               ) : null}
 

@@ -3,21 +3,21 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   BackIcon,
   CheckIcon,
-  DownloadIcon,
+  MusicIcon,
   NextIcon,
   PauseIcon,
   PencilIcon,
   PlayIcon,
-  TrashIcon,
 } from '../components/Icons.jsx'
+import { PublishPanel } from '../components/PublishPanel.jsx'
 import { StoryCover } from '../components/StoryCover.jsx'
 import { useStoryAudio } from '../hooks/useStoryAudio.js'
 import {
   deleteStory,
-  downloadStoryFile,
   fetchStoryWithSegments,
   saveSegmentsTiming,
   updateSegmentText,
+  updateStoryAudio,
   updateStoryCoverImage,
   updateStoryDetails,
 } from '../lib/storyApi.js'
@@ -35,16 +35,6 @@ const inputClassName =
 
 function isTypingTarget(element) {
   return ['INPUT', 'TEXTAREA', 'SELECT'].includes(element?.tagName)
-}
-
-function getPublishMessage(story) {
-  if (!story.isInCatalog) {
-    return 'Está guardado solo en este dispositivo. Descargá el .cuento para no perderlo y para publicarlo.'
-  }
-
-  return story.isLocal
-    ? 'Está publicado, pero tiene cambios que solo están en este dispositivo. Descargá el .cuento para publicarlos.'
-    : 'Está publicado. Si lo cambiás, los cambios quedan en este dispositivo hasta que lo vuelvas a publicar.'
 }
 
 // Debounced autosave: call schedule(value) on every change; the latest value
@@ -232,8 +222,8 @@ export function EditorPage() {
   const [errorMessage, setErrorMessage] = useState('')
   const [pendingSaves, setPendingSaves] = useState(0)
   const [editingIndex, setEditingIndex] = useState(null)
-  const [isDownloading, setIsDownloading] = useState(false)
   const [lockedNextIndex, setLockedNextIndex] = useState(null)
+  const [audioNotice, setAudioNotice] = useState('')
 
   useEffect(() => {
     let isMounted = true
@@ -398,6 +388,44 @@ export function EditorPage() {
     }
   }
 
+  function handleAudioChange(event) {
+    const [file] = event.target.files ?? []
+    event.target.value = ''
+
+    if (!file) {
+      return
+    }
+
+    audio.pause()
+    runSave(async () => {
+      const updatedStory = await updateStoryAudio(storyId, file)
+      setStory((currentStory) => ({ ...currentStory, ...updatedStory }))
+      setAudioNotice(
+        markedCount > 0
+          ? 'Audio cambiado. Si es otra grabación, los tiempos marcados ya no van a coincidir: revisalos o borralos y marcalos de nuevo.'
+          : 'Audio cambiado.',
+      )
+    })
+  }
+
+  function handleClearTimings() {
+    const confirmed = window.confirm(
+      '¿Borrar todos los tiempos marcados? Vas a tener que marcar todas las frases de nuevo.',
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    audio.pause()
+    audio.seek(0)
+    setLockedNextIndex(null)
+    setAudioNotice('')
+    changeSegments((currentSegments) =>
+      currentSegments.map((segment) => ({ ...segment, start_time: null, end_time: null })),
+    )
+  }
+
   function handleSegmentSave(index, { text, startTime }) {
     const segment = segments[index]
     setEditingIndex(null)
@@ -419,19 +447,6 @@ export function EditorPage() {
             )
           : updateSegmentTiming(currentSegments, index, startTime),
       )
-    }
-  }
-
-  async function handleDownload() {
-    setIsDownloading(true)
-    setErrorMessage('')
-
-    try {
-      await downloadStoryFile(storyId)
-    } catch (error) {
-      setErrorMessage(error.message || 'No se pudo generar el archivo .cuento.')
-    } finally {
-      setIsDownloading(false)
     }
   }
 
@@ -531,6 +546,20 @@ export function EditorPage() {
             <p className="mt-2 hidden text-xs text-slate-400 sm:block">
               Teclado: espacio = play/pausa · → o Enter = siguiente frase · ← = volver {REWIND_SECONDS} s
             </p>
+            {audioNotice ? (
+              <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+                {audioNotice}
+              </p>
+            ) : null}
+            {markedCount > 0 ? (
+              <button
+                type="button"
+                onClick={handleClearTimings}
+                className="mt-3 text-sm font-semibold text-rose-600 hover:text-rose-800"
+              >
+                Borrar todos los tiempos
+              </button>
+            ) : null}
           </div>
 
           <ol className="space-y-2">
@@ -572,6 +601,18 @@ export function EditorPage() {
               </span>
               <input type="file" accept="image/*" onChange={handleCoverChange} className="sr-only" />
             </label>
+            <label className="flex cursor-pointer items-center gap-3 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200 transition hover:ring-violet-300">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
+                <MusicIcon className="h-5 w-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-slate-800">
+                  Audio · {formatTime(audio.duration)}
+                </span>
+                <span className="block text-sm font-semibold text-violet-700">Cambiar audio</span>
+              </span>
+              <input type="file" accept="audio/*" onChange={handleAudioChange} className="sr-only" />
+            </label>
             <label className="block space-y-1">
               <span className="text-xs font-bold text-slate-500">Título</span>
               <input
@@ -593,37 +634,11 @@ export function EditorPage() {
             </label>
           </div>
 
-          <div className="space-y-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-            <h3 className="font-bold">Guardar y publicar</h3>
-            <p className="text-sm text-slate-600">{getPublishMessage(story)}</p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={handleDownload}
-                disabled={isDownloading}
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300"
-              >
-                <DownloadIcon className="h-4 w-4" />
-                {isDownloading ? 'Preparando...' : 'Descargar .cuento'}
-              </button>
-              <Link
-                to={`/player/${story.id}`}
-                className="inline-flex items-center rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300"
-              >
-                Ver como Aurora
-              </Link>
-            </div>
-            {!story.isInCatalog || story.isLocal ? (
-              <button
-                type="button"
-                onClick={handleDelete}
-                className="inline-flex items-center gap-1.5 text-sm font-semibold text-rose-600 hover:text-rose-800"
-              >
-                <TrashIcon className="h-4 w-4" />
-                {story.isInCatalog ? 'Descartar cambios' : 'Borrar cuento'}
-              </button>
-            ) : null}
-          </div>
+          <PublishPanel
+            story={story}
+            missingCount={segments.length - markedCount}
+            onDelete={handleDelete}
+          />
         </aside>
       </div>
 

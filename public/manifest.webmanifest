@@ -1,6 +1,6 @@
 {
-  "name": "Audiolibros de Aurora",
-  "short_name": "Audiolibros",
+  "name": "Cuentos de Aurora",
+  "short_name": "Cuentos",
   "description": "Cuentos para leer y escuchar.",
   "start_url": "./",
   "scope": "./",

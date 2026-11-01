@@ -78,14 +78,18 @@ La app pide almacenamiento persistente (`navigator.storage.persist()`). En iPhon
 
 ## Flujo para crear y publicar un cuento
 
-1. `npm run dev` y activa `Modo admin`
-2. `Crear cuento`: titulo, audio, portada opcional y texto
+1. Activa el modo admin (mantener apretado el candado) y toca `Nuevo`
+2. Carga titulo, "leido por", audio, portada opcional y texto
 3. En el editor, dale play y toca `Siguiente frase` justo cuando empieza cada una (en la compu: espacio = play/pausa, flecha derecha o Enter = siguiente frase, flecha izquierda = volver 3 s)
 4. Si una frase quedo mal marcada, volve unos segundos y tocala de nuevo, o editala con el lapiz
-5. `Descargar .cuento`
-6. Copia el archivo a `public/cuentos/`, commitea y pushea
+5. Toca `Compartir .cuento`: en el celular abre el menu para compartir (WhatsApp, mail...); donde no se puede, se descarga el archivo
+6. Quien publica (con acceso al repo) sube el archivo a `public/cuentos`: desde la app (`¿Publicas vos? Subilo a GitHub`), arrastrandolo en la pagina de la carpeta en GitHub y tocando `Commit changes`, o con un commit normal. En uno o dos minutos el sitio se vuelve a publicar con el cuento
 
-Para corregir un cuento publicado: editalo, descarga el `.cuento` y reemplaza el archivo en `public/cuentos/`.
+Si el audio estaba mal, en el editor se cambia con `Cambiar audio`. Los tiempos se mantienen; si es otra grabacion, conviene `Borrar todos los tiempos` y marcarlos de nuevo.
+
+Para corregir un cuento publicado: editalo y volve a compartir el `.cuento`. El archivo sale con el mismo nombre que el publicado, asi que al subirlo lo reemplaza. Cuando el sitio ya tiene esa version, la app lo muestra como `Publicado` otra vez.
+
+Si en `public/cuentos` quedan dos archivos con el mismo cuento (mismo `id`), se publica el mas nuevo y el build avisa cual sobra.
 
 ## Publicacion en GitHub Pages
 

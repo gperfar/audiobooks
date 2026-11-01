@@ -31,8 +31,7 @@ export function buildCuentosCatalog() {
   const fileNames = readdirSync(catalogDirectory)
     .filter((fileName) => fileName.endsWith('.cuento'))
     .sort()
-  const fileNameById = new Map()
-  const stories = []
+  const storiesById = new Map()
   const errors = []
 
   for (const fileName of fileNames) {
@@ -48,14 +47,20 @@ export function buildCuentosCatalog() {
 
     const { manifest, cover } = cuento
 
-    if (fileNameById.has(manifest.id)) {
+    const duplicate = storiesById.get(manifest.id)
+
+    if (duplicate && duplicate.updatedAt >= manifest.updatedAt) {
       errors.push(
-        `${fileName}: tiene el mismo id que ${fileNameById.get(manifest.id)}, se ignora.`,
+        `${fileName}: es otra versión de ${duplicate.fileName}, que es más nueva; se ignora. Borrá uno de los dos.`,
       )
       continue
     }
 
-    fileNameById.set(manifest.id, fileName)
+    if (duplicate) {
+      errors.push(
+        `${duplicate.fileName}: es otra versión de ${fileName}, que es más nueva; se ignora. Borrá uno de los dos.`,
+      )
+    }
 
     // Content hash in the URL so browsers re-download a story when it changes.
     const version = createHash('sha256').update(bytes).digest('hex').slice(0, 12)
@@ -68,16 +73,24 @@ export function buildCuentosCatalog() {
       coverPath = `cuentos/portadas/${coverFileName}?v=${version}`
     }
 
-    stories.push({
+    storiesById.set(manifest.id, {
+      fileName,
       id: manifest.id,
       title: manifest.title,
       narrator: manifest.narrator ?? null,
       createdAt: manifest.createdAt,
+      updatedAt: manifest.updatedAt,
       file: `cuentos/${encodeURIComponent(fileName)}?v=${version}`,
       cover: coverPath,
       ...getSegmentStats(manifest.segments),
     })
   }
+
+  // Drop the internal fileName (used only for the duplicate warnings).
+  const stories = [...storiesById.values()].map((story) => {
+    const { fileName: _fileName, ...entry } = story
+    return entry
+  })
 
   writeFileSync(indexPath, `${JSON.stringify({ stories }, null, 2)}\n`)
 

@@ -90,37 +90,70 @@ async function cuentoFromRecord(record) {
   })
 }
 
-async function loadStoryRecord(storyId) {
-  const storedRecord = await getStoredStory(storyId)
+// A local edit counts as published once the catalog has a version at least
+// as new (e.g. after uploading the downloaded .cuento and redeploying).
+function isPublishedVersion(record, entry) {
+  return Boolean(
+    entry?.updatedAt &&
+      record.manifest.updatedAt &&
+      entry.updatedAt >= record.manifest.updatedAt,
+  )
+}
+
+async function markAsPublished(record, entry) {
+  const cacheRecord = { ...record, kind: 'cache', sourceUrl: entry.file }
+  await putStoredStory(cacheRecord)
+  return cacheRecord
+}
+
+async function resolveStory(storyId) {
+  const [storedRecord, catalog] = await Promise.all([
+    getStoredStory(storyId),
+    fetchCatalog(),
+  ])
+  const entry = catalog.stories.find((story) => story.id === storyId) ?? null
 
   if (storedRecord?.kind === 'local') {
-    return storedRecord
-  }
+    const record = isPublishedVersion(storedRecord, entry)
+      ? await markAsPublished(storedRecord, entry)
+      : storedRecord
 
-  const catalog = await fetchCatalog()
-  const entry = catalog.stories.find((story) => story.id === storyId)
+    return { record, entry }
+  }
 
   if (!entry) {
     if (storedRecord) {
-      return storedRecord
+      return { record: storedRecord, entry }
     }
 
     throw new Error('No encontramos este cuento.')
   }
 
   if (storedRecord?.sourceUrl === entry.file) {
-    return storedRecord
+    return { record: storedRecord, entry }
   }
 
   try {
-    return await downloadCatalogStory(entry)
+    return { record: await downloadCatalogStory(entry), entry }
   } catch (error) {
     if (storedRecord) {
-      return storedRecord
+      return { record: storedRecord, entry }
     }
 
     throw error
   }
+}
+
+async function loadStoryRecord(storyId) {
+  return (await resolveStory(storyId)).record
+}
+
+function getPublishedFileName(entry) {
+  if (!entry) {
+    return null
+  }
+
+  return decodeURIComponent(entry.file.replace(/^cuentos\//, '').replace(/\?.*$/, ''))
 }
 
 // Edits are read-modify-write on the whole record, so run them one at a time:
@@ -206,8 +239,19 @@ export async function getAllStoriesWithSegmentStats() {
     fetchCatalog(),
     getAllStoredStories(),
   ])
-  const catalogIds = new Set(catalog.stories.map((story) => story.id))
-  const storedById = new Map(storedRecords.map((record) => [record.id, record]))
+  const catalogById = new Map(catalog.stories.map((story) => [story.id, story]))
+  const storedById = new Map()
+
+  for (const storedRecord of storedRecords) {
+    const entry = catalogById.get(storedRecord.id)
+    const record =
+      storedRecord.kind === 'local' && isPublishedVersion(storedRecord, entry)
+        ? await markAsPublished(storedRecord, entry)
+        : storedRecord
+
+    storedById.set(record.id, record)
+  }
+
   const stories = []
 
   for (const entry of catalog.stories) {
@@ -232,8 +276,8 @@ export async function getAllStoriesWithSegmentStats() {
     })
   }
 
-  for (const record of storedRecords) {
-    const isInCatalog = catalogIds.has(record.id)
+  for (const record of storedById.values()) {
+    const isInCatalog = catalogById.has(record.id)
 
     if (record.kind === 'cache' && (isInCatalog || catalog.isAvailable)) {
       // Either listed above, or removed from the published catalog.
@@ -261,8 +305,7 @@ export async function getAllStoriesWithSegmentStats() {
 }
 
 export async function fetchStoryWithSegments(storyId) {
-  const record = await loadStoryRecord(storyId)
-  const catalog = await fetchCatalog()
+  const { record, entry } = await resolveStory(storyId)
   const { manifest } = record
 
   return {
@@ -274,8 +317,9 @@ export async function fetchStoryWithSegments(storyId) {
     cover_image_url: createObjectUrl(`${record.id}:cover`, record.cover),
     listen_count: getListenCount(record.id),
     created_at: manifest.createdAt,
-    isInCatalog: catalog.stories.some((story) => story.id === record.id),
+    isInCatalog: Boolean(entry),
     isLocal: record.kind === 'local',
+    publishedFileName: getPublishedFileName(entry),
     segments: manifest.segments.map((segment, index) => ({
       id: String(index),
       text: segment.text,
@@ -341,6 +385,23 @@ export async function updateStoryCoverImage(storyId, coverImageFile) {
   }
 }
 
+// Replaces the recording but keeps the sentence timings: the editor offers to
+// clear them, since a different recording usually needs marking again.
+export async function updateStoryAudio(storyId, audioFile) {
+  const audioFileName = `audio.${getFileExtension(audioFile.name) || 'mp3'}`
+  const record = await updateStoryRecord(storyId, () => ({
+    audio: new Blob([audioFile], { type: getMimeType(audioFileName) }),
+    manifest: { audio: audioFileName },
+  }))
+
+  return {
+    id: storyId,
+    audio_url: createObjectUrl(`${storyId}:audio`, record.audio),
+    audio_format: getFileExtension(audioFileName),
+    isLocal: true,
+  }
+}
+
 export async function updateSegmentText(storyId, segmentId, text) {
   const segmentIndex = Number(segmentId)
 
@@ -393,14 +454,58 @@ function slugify(value) {
   )
 }
 
-export async function downloadStoryFile(storyId) {
-  const record = await loadStoryRecord(storyId)
+// Name of the .cuento file for this story: the published file's name when it
+// is already in the catalog (so uploading it replaces that file), otherwise
+// one derived from the title.
+export function getStoryFileName(story) {
+  return story.publishedFileName ?? `${slugify(story.title)}.cuento`
+}
+
+async function createStoryFile(storyId) {
+  const { record, entry } = await resolveStory(storyId)
   const bytes = await cuentoFromRecord(record)
-  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }))
+  const fileName = getStoryFileName({
+    title: record.manifest.title,
+    publishedFileName: getPublishedFileName(entry),
+  })
+
+  return new File([bytes], fileName, { type: 'application/zip' })
+}
+
+function downloadFile(file) {
+  const url = URL.createObjectURL(file)
   const link = document.createElement('a')
 
   link.href = url
-  link.download = `${slugify(record.manifest.title)}.cuento`
+  link.download = file.name
   link.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+export async function downloadStoryFile(storyId) {
+  const file = await createStoryFile(storyId)
+  downloadFile(file)
+  return file.name
+}
+
+// Opens the phone's share menu (WhatsApp, mail...) with the .cuento file when
+// the browser allows sharing it; otherwise downloads it. Resolves to
+// { fileName, method: 'shared' | 'downloaded' | 'cancelled' }.
+export async function shareStoryFile(storyId) {
+  const file = await createStoryFile(storyId)
+
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: file.name })
+      return { fileName: file.name, method: 'shared' }
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        return { fileName: file.name, method: 'cancelled' }
+      }
+      // Some browsers claim support and then refuse: fall back to a download.
+    }
+  }
+
+  downloadFile(file)
+  return { fileName: file.name, method: 'downloaded' }
 }

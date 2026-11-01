@@ -1,8 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Howl } from 'howler'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import {
+  BackIcon,
+  CheckIcon,
+  DownloadIcon,
+  NextIcon,
+  PauseIcon,
+  PencilIcon,
+  PlayIcon,
+  TrashIcon,
+} from '../components/Icons.jsx'
 import { StoryCover } from '../components/StoryCover.jsx'
-import { useAdminMode } from '../contexts/useAdminMode.js'
+import { useStoryAudio } from '../hooks/useStoryAudio.js'
 import {
   deleteStory,
   downloadStoryFile,
@@ -10,64 +19,227 @@ import {
   saveSegmentsTiming,
   updateSegmentText,
   updateStoryCoverImage,
-  updateStoryTitle,
+  updateStoryDetails,
 } from '../lib/storyApi.js'
 import {
   findActiveSegment,
+  getNextSegmentIndex,
   updateSegmentTiming,
 } from '../utils/editorTiming.js'
+import { formatPreciseTime, formatTime } from '../utils/formatTime.js'
 
-function formatTime(value) {
-  if (typeof value !== 'number' || Number.isNaN(value)) {
-    return '--:--'
+const REWIND_SECONDS = 3
+
+const inputClassName =
+  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100'
+
+function isTypingTarget(element) {
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(element?.tagName)
+}
+
+function getPublishMessage(story) {
+  if (!story.isInCatalog) {
+    return 'Está guardado solo en este dispositivo. Descargá el .cuento para no perderlo y para publicarlo.'
   }
 
-  const minutes = Math.floor(value / 60)
-  const seconds = Math.floor(value % 60)
+  return story.isLocal
+    ? 'Está publicado, pero tiene cambios que solo están en este dispositivo. Descargá el .cuento para publicarlos.'
+    : 'Está publicado. Si lo cambiás, los cambios quedan en este dispositivo hasta que lo vuelvas a publicar.'
+}
 
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+// Debounced autosave: call schedule(value) on every change; the latest value
+// is saved after `delay` ms without changes.
+function useAutosave(save, delay) {
+  const timeoutRef = useRef(null)
+  const latestValueRef = useRef(null)
+  const saveRef = useRef(save)
+
+  useEffect(() => {
+    saveRef.current = save
+  }, [save])
+
+  const flush = useCallback(() => {
+    if (!timeoutRef.current) {
+      return
+    }
+
+    clearTimeout(timeoutRef.current)
+    timeoutRef.current = null
+    saveRef.current(latestValueRef.current)
+  }, [])
+
+  const schedule = useCallback(
+    (value) => {
+      latestValueRef.current = value
+      clearTimeout(timeoutRef.current)
+      timeoutRef.current = setTimeout(() => {
+        timeoutRef.current = null
+        saveRef.current(latestValueRef.current)
+      }, delay)
+    },
+    [delay],
+  )
+
+  // Save pending changes when leaving the page.
+  useEffect(() => flush, [flush])
+
+  return schedule
+}
+
+// Mounted fresh each time editing starts, so drafts start from current values.
+function SentenceEditor({ segment, index, onSave, onCancel, rowRef }) {
+  const [textDraft, setTextDraft] = useState(segment.text)
+  const [timeDraft, setTimeDraft] = useState(segment.start_time ?? '')
+
+  return (
+      <li ref={rowRef} className="scroll-mt-24 scroll-mb-48 rounded-2xl bg-white p-4 shadow-sm ring-2 ring-violet-300">
+        <p className="mb-2 text-xs font-bold text-violet-700">Frase {index + 1}</p>
+        <textarea
+          value={textDraft}
+          onChange={(event) => setTextDraft(event.target.value)}
+          rows={3}
+          className={`${inputClassName} story-text text-lg`}
+        />
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <label className="block">
+            <span className="text-xs font-bold text-slate-500">Empieza en (segundos)</span>
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={timeDraft}
+              onChange={(event) => setTimeDraft(event.target.value)}
+              className={`${inputClassName} mt-1 w-32`}
+            />
+          </label>
+          <div className="ml-auto flex gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                onSave({
+                  text: textDraft.trim(),
+                  startTime: timeDraft === '' ? null : Number(timeDraft),
+                })
+              }
+              disabled={!textDraft.trim()}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:bg-slate-300"
+            >
+              <CheckIcon className="h-4 w-4" />
+              Listo
+            </button>
+          </div>
+        </div>
+      </li>
+  )
+}
+
+function SentenceRow({
+  segment,
+  index,
+  isActive,
+  isNext,
+  isEditing,
+  onSeek,
+  onStartEditing,
+  onSave,
+  onCancel,
+  rowRef,
+}) {
+  const isMarked = typeof segment.start_time === 'number'
+
+  if (isEditing) {
+    return (
+      <SentenceEditor
+        segment={segment}
+        index={index}
+        onSave={onSave}
+        onCancel={onCancel}
+        rowRef={rowRef}
+      />
+    )
+  }
+
+  return (
+    <li
+      ref={rowRef}
+      className={[
+        'flex scroll-mt-24 scroll-mb-48 items-start gap-3 rounded-2xl p-3 transition',
+        isActive
+          ? 'bg-violet-100 ring-2 ring-violet-300'
+          : isNext
+            ? 'bg-white outline-2 outline-dashed outline-amber-400'
+            : 'bg-white ring-1 ring-slate-200',
+      ].join(' ')}
+    >
+      <span
+        className={[
+          'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold',
+          isMarked ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-500',
+        ].join(' ')}
+      >
+        {index + 1}
+      </span>
+
+      <button
+        type="button"
+        onClick={onSeek}
+        disabled={!isMarked}
+        title={isMarked ? 'Escuchar desde esta frase' : undefined}
+        className="min-w-0 flex-1 text-left disabled:cursor-default"
+      >
+        <span className="story-text block text-lg leading-snug text-slate-900">{segment.text}</span>
+        <span className="mt-1 block text-xs font-semibold tabular-nums text-slate-500">
+          {isMarked ? (
+            formatPreciseTime(segment.start_time)
+          ) : isNext ? (
+            <span className="text-amber-700">Sigue esta</span>
+          ) : (
+            'Sin marcar'
+          )}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        onClick={onStartEditing}
+        aria-label={`Editar frase ${index + 1}`}
+        className="shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+      >
+        <PencilIcon className="h-4 w-4" />
+      </button>
+    </li>
+  )
 }
 
 export function EditorPage() {
   const { storyId } = useParams()
   const navigate = useNavigate()
-  const { isAdminMode } = useAdminMode()
-  const soundRef = useRef(null)
-  const animationFrameRef = useRef(null)
-  const segmentRefs = useRef({})
+  const rowRefs = useRef({})
 
   const [story, setStory] = useState(null)
   const [segments, setSegments] = useState([])
-  const [currentTime, setCurrentTime] = useState(0)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
-  const [isSavingCover, setIsSavingCover] = useState(false)
-  const [errorMessage, setErrorMessage] = useState('')
-  const [saveMessage, setSaveMessage] = useState('')
-  const [selectedSegmentId, setSelectedSegmentId] = useState(null)
-  const [coverImageFile, setCoverImageFile] = useState(null)
   const [titleDraft, setTitleDraft] = useState('')
-  const [isSavingTitle, setIsSavingTitle] = useState(false)
-  const [isDeletingStory, setIsDeletingStory] = useState(false)
+  const [narratorDraft, setNarratorDraft] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
+  const [pendingSaves, setPendingSaves] = useState(0)
+  const [editingIndex, setEditingIndex] = useState(null)
   const [isDownloading, setIsDownloading] = useState(false)
-  const [editingSegmentId, setEditingSegmentId] = useState(null)
-
-  const activeSegment = useMemo(
-    () => findActiveSegment(segments, currentTime),
-    [segments, currentTime],
-  )
+  const [lockedNextIndex, setLockedNextIndex] = useState(null)
 
   useEffect(() => {
     let isMounted = true
 
-    async function loadStory() {
-      setIsLoading(true)
-      setErrorMessage('')
-
-      try {
-        const data = await fetchStoryWithSegments(storyId)
-
+    fetchStoryWithSegments(storyId)
+      .then((data) => {
         if (!isMounted) {
           return
         }
@@ -75,310 +247,184 @@ export function EditorPage() {
         setStory(data)
         setSegments(data.segments)
         setTitleDraft(data.title ?? '')
-      } catch (error) {
+        setNarratorDraft(data.narrator ?? '')
+      })
+      .catch((error) => {
         if (isMounted) {
-          setErrorMessage(error.message || 'No se pudo cargar el editor del cuento.')
+          setLoadError(error.message || 'No se pudo abrir el cuento.')
         }
-      } finally {
+      })
+      .finally(() => {
         if (isMounted) {
           setIsLoading(false)
         }
-      }
-    }
-
-    loadStory()
+      })
 
     return () => {
       isMounted = false
     }
   }, [storyId])
 
-  useEffect(() => {
-    if (!story?.audio_url) {
-      return undefined
-    }
+  const audio = useStoryAudio(story?.audio_url)
 
-    const sound = new Howl({
-      src: [story.audio_url],
-      // Blob URLs have no extension, so Howler needs the format explicitly.
-      format: [story.audio_format],
-      html5: true,
-      onplay: () => {
-        setIsPlaying(true)
+  // --- Saving -----------------------------------------------------------------
+
+  const runSave = useCallback(async (save) => {
+    setPendingSaves((count) => count + 1)
+    setErrorMessage('')
+
+    try {
+      await save()
+      setStory((currentStory) => ({ ...currentStory, isLocal: true }))
+    } catch (error) {
+      setErrorMessage(error.message || 'No se pudieron guardar los cambios.')
+    } finally {
+      setPendingSaves((count) => count - 1)
+    }
+  }, [])
+
+  const scheduleTimingSave = useAutosave(
+    useCallback(
+      (nextSegments) => runSave(() => saveSegmentsTiming(storyId, nextSegments)),
+      [runSave, storyId],
+    ),
+    400,
+  )
+
+  const scheduleDetailsSave = useAutosave(
+    useCallback(
+      (details) => {
+        if (details.title) {
+          runSave(() => updateStoryDetails(storyId, details))
+        }
       },
-      onpause: () => {
-        setIsPlaying(false)
-      },
-      onstop: () => {
-        setIsPlaying(false)
-      },
-      onend: () => {
-        setIsPlaying(false)
-      },
+      [runSave, storyId],
+    ),
+    700,
+  )
+
+  function changeSegments(updater) {
+    setSegments((currentSegments) => {
+      const nextSegments = updater(currentSegments)
+      scheduleTimingSave(nextSegments)
+      return nextSegments
     })
+  }
 
-    soundRef.current = sound
+  // --- Syncing ----------------------------------------------------------------
 
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
+  const activeSegment = findActiveSegment(segments, audio.currentTime)
+  const nextIndex = getNextSegmentIndex(segments, audio.currentTime, lockedNextIndex)
+  const nextSegment = segments[nextIndex] ?? null
+  const markedCount = segments.filter((segment) => typeof segment.start_time === 'number').length
+
+  const markNextSegment = useCallback(() => {
+    const time = Math.round(audio.getTime() * 100) / 100
+
+    setLockedNextIndex(null)
+    setSegments((currentSegments) => {
+      const index = getNextSegmentIndex(currentSegments, time, lockedNextIndex)
+
+      if (index >= currentSegments.length) {
+        return currentSegments
       }
 
-      sound.unload()
-      soundRef.current = null
-    }
-  }, [story?.audio_url, story?.audio_format])
+      const nextSegments = updateSegmentTiming(currentSegments, index, time)
+      scheduleTimingSave(nextSegments)
+      return nextSegments
+    })
+  }, [audio, lockedNextIndex, scheduleTimingSave])
+
+  // Seeking back (to fix a mark) keeps the button on the sentence that comes
+  // next from the new position.
+  const seekTo = useCallback(
+    (time) => {
+      audio.seek(time)
+      setLockedNextIndex(getNextSegmentIndex(segments, time))
+    },
+    [audio, segments],
+  )
+
+  const rewind = useCallback(() => {
+    seekTo(Math.max(audio.getTime() - REWIND_SECONDS, 0))
+  }, [audio, seekTo])
 
   useEffect(() => {
-    if (!isPlaying) {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
-      }
-
-      return undefined
-    }
-
-    function updateAudioTime() {
-      const sound = soundRef.current
-
-      if (!sound) {
+    function handleKeyDown(event) {
+      if (isTypingTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey) {
         return
       }
 
-      const nextTime = Number(sound.seek() || 0)
-      setCurrentTime(nextTime)
-      animationFrameRef.current = requestAnimationFrame(updateAudioTime)
-    }
-
-    animationFrameRef.current = requestAnimationFrame(updateAudioTime)
-
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
+      if (event.code === 'Space') {
+        event.preventDefault()
+        audio.toggle()
+      } else if (event.key === 'ArrowRight' || event.key === 'Enter') {
+        event.preventDefault()
+        markNextSegment()
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        rewind()
       }
     }
-  }, [isPlaying])
 
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [audio, markNextSegment, rewind])
+
+  // Follow the audio through the list while playing.
   useEffect(() => {
-    if (!activeSegment?.id) {
-      return
+    if (audio.isPlaying && activeSegment) {
+      rowRefs.current[activeSegment.id]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
+  }, [activeSegment, audio.isPlaying])
 
-    const element = segmentRefs.current[activeSegment.id]
-    element?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'nearest',
-    })
-  }, [activeSegment?.id])
+  // --- Other edits --------------------------------------------------------------
 
-  function togglePlayback() {
-    const sound = soundRef.current
-
-    if (!sound) {
-      return
-    }
-
-    setSaveMessage('')
-
-    if (sound.playing()) {
-      sound.pause()
-      setCurrentTime(Number(sound.seek() || 0))
-      return
-    }
-
-    sound.play()
+  function handleDetailsChange(nextTitle, nextNarrator) {
+    setTitleDraft(nextTitle)
+    setNarratorDraft(nextNarrator)
+    scheduleDetailsSave({ title: nextTitle.trim(), narrator: nextNarrator.trim() })
   }
 
-  function handleSegmentClick(index) {
-    const sound = soundRef.current
-    const clickedSegment = segments[index]
-
-    if (!clickedSegment) {
-      return
-    }
-
-    setSelectedSegmentId(clickedSegment.id)
-    setSaveMessage('')
-
-    if (!sound?.playing()) {
-      return
-    }
-
-    const time = Number(sound.seek() || 0)
-
-    // Keep the timing update intentionally simple: assign the clicked sentence
-    // start and close the previous sentence at the same playback time.
-    setSegments((currentSegments) => updateSegmentTiming(currentSegments, index, time))
-    setCurrentTime(time)
-  }
-
-  function handleManualStartTimeChange(index, value) {
-    const parsedValue = value === '' ? null : Number(value)
-
-    if (parsedValue !== null && Number.isNaN(parsedValue)) {
-      return
-    }
-
-    setSaveMessage('')
-    setSegments((currentSegments) => {
-      if (parsedValue === null) {
-        return currentSegments.map((segment, currentIndex) => {
-          if (currentIndex === index) {
-            return { ...segment, start_time: null }
-          }
-
-          return segment
-        })
-      }
-
-      return updateSegmentTiming(currentSegments, index, parsedValue)
-    })
-  }
-
-  function handleCoverImageChange(event) {
+  function handleCoverChange(event) {
     const [file] = event.target.files ?? []
-    setCoverImageFile(file ?? null)
-    setErrorMessage('')
-    setSaveMessage('')
-  }
+    event.target.value = ''
 
-  async function handleTitleSave() {
-    const trimmedTitle = titleDraft.trim()
-
-    if (!trimmedTitle || !storyId) {
-      setErrorMessage('Agrega un título válido antes de guardar.')
-      return
-    }
-
-    setIsSavingTitle(true)
-    setErrorMessage('')
-    setSaveMessage('')
-
-    try {
-      const updatedStory = await updateStoryTitle(storyId, trimmedTitle)
-      setStory((currentStory) => ({
-        ...currentStory,
-        ...updatedStory,
-        segments: currentStory?.segments ?? [],
-      }))
-      setTitleDraft(updatedStory.title)
-      setSaveMessage('Título actualizado.')
-    } catch (error) {
-      setErrorMessage(error.message || 'No se pudo actualizar el título.')
-    } finally {
-      setIsSavingTitle(false)
+    if (file) {
+      runSave(async () => {
+        const updatedStory = await updateStoryCoverImage(storyId, file)
+        setStory((currentStory) => ({ ...currentStory, ...updatedStory }))
+      })
     }
   }
 
-  async function handleDeleteStory() {
-    if (!storyId) {
-      return
-    }
+  function handleSegmentSave(index, { text, startTime }) {
+    const segment = segments[index]
+    setEditingIndex(null)
 
-    const confirmed = window.confirm(
-      story?.isInCatalog
-        ? '¿Descartar los cambios hechos en este dispositivo? Volverás a ver la versión publicada.'
-        : '¿Seguro que quieres borrar este cuento de este dispositivo? Si no lo descargaste como .cuento, no se puede recuperar.',
-    )
-
-    if (!confirmed) {
-      return
-    }
-
-    setIsDeletingStory(true)
-    setErrorMessage('')
-    setSaveMessage('')
-
-    try {
-      await deleteStory(storyId)
-      navigate('/')
-    } catch (error) {
-      setErrorMessage(error.message || 'No se pudo borrar el cuento.')
-    } finally {
-      setIsDeletingStory(false)
-    }
-  }
-
-  function handleSegmentTextChange(index, value) {
-    setSegments((currentSegments) =>
-      currentSegments.map((segment, currentIndex) =>
-        currentIndex === index ? { ...segment, text: value } : segment,
-      ),
-    )
-  }
-
-  async function handleSegmentTextSave(segmentId, text) {
-    const trimmedText = text.trim()
-
-    if (!trimmedText) {
-      setErrorMessage('El texto de la frase no puede quedar vacío.')
-      return
-    }
-
-    setErrorMessage('')
-    setSaveMessage('')
-
-    try {
-      const updatedSegment = await updateSegmentText(storyId, segmentId, trimmedText)
+    if (text !== segment.text) {
       setSegments((currentSegments) =>
-        currentSegments.map((segment) =>
-          segment.id === segmentId ? { ...segment, ...updatedSegment } : segment,
+        currentSegments.map((current, currentIndex) =>
+          currentIndex === index ? { ...current, text } : current,
         ),
       )
-      setStory((currentStory) => ({ ...currentStory, isLocal: true }))
-      setEditingSegmentId(null)
-      setSaveMessage('Texto de la frase actualizado.')
-    } catch (error) {
-      setErrorMessage(error.message || 'No se pudo actualizar la frase.')
-    }
-  }
-
-  async function handleCoverImageSave() {
-    if (!coverImageFile || !storyId) {
-      return
+      runSave(() => updateSegmentText(storyId, segment.id, text))
     }
 
-    setIsSavingCover(true)
-    setErrorMessage('')
-    setSaveMessage('')
-
-    try {
-      const updatedStory = await updateStoryCoverImage(storyId, coverImageFile)
-
-      setStory((currentStory) => ({
-        ...currentStory,
-        ...updatedStory,
-        segments: currentStory?.segments ?? [],
-      }))
-      setCoverImageFile(null)
-      setSaveMessage('Portada actualizada.')
-    } catch (error) {
-      setErrorMessage(error.message || 'No se pudo actualizar la portada.')
-    } finally {
-      setIsSavingCover(false)
-    }
-  }
-
-  async function handleSave() {
-    setIsSaving(true)
-    setErrorMessage('')
-    setSaveMessage('')
-
-    try {
-      await saveSegmentsTiming(storyId, segments)
-      setStory((currentStory) => ({ ...currentStory, isLocal: true }))
-      setSaveMessage('Tiempos guardados.')
-    } catch (error) {
-      setErrorMessage(error.message || 'No se pudieron guardar los tiempos.')
-    } finally {
-      setIsSaving(false)
+    if (startTime !== segment.start_time && !Number.isNaN(startTime)) {
+      changeSegments((currentSegments) =>
+        startTime === null
+          ? currentSegments.map((current, currentIndex) =>
+              currentIndex === index ? { ...current, start_time: null } : current,
+            )
+          : updateSegmentTiming(currentSegments, index, startTime),
+      )
     }
   }
 
   async function handleDownload() {
     setIsDownloading(true)
     setErrorMessage('')
-    setSaveMessage('')
 
     try {
       await downloadStoryFile(storyId)
@@ -389,349 +435,255 @@ export function EditorPage() {
     }
   }
 
+  async function handleDelete() {
+    const confirmed = window.confirm(
+      story.isInCatalog
+        ? '¿Descartar los cambios hechos en este dispositivo? Vas a volver a la versión publicada.'
+        : '¿Borrar este cuento? Si no lo descargaste como .cuento, no se puede recuperar.',
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      await deleteStory(storyId)
+      navigate('/')
+    } catch (error) {
+      setErrorMessage(error.message || 'No se pudo borrar el cuento.')
+    }
+  }
+
+  const progressPercent = useMemo(
+    () => (segments.length > 0 ? Math.round((markedCount / segments.length) * 100) : 0),
+    [markedCount, segments.length],
+  )
+
   if (isLoading) {
-    return (
-      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <p className="text-sm text-slate-600">Cargando editor del cuento...</p>
-      </section>
-    )
+    return <p className="py-16 text-center text-slate-500">Abriendo el cuento...</p>
   }
 
-  if (errorMessage && !story) {
+  if (loadError) {
     return (
-      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <p className="text-sm text-rose-700">{errorMessage}</p>
-      </section>
-    )
-  }
-
-  if (!isAdminMode) {
-    return (
-      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
-          El editor solo está disponible en modo admin
-        </h2>
-        <p className="mt-3 text-sm text-slate-600 sm:text-base">
-          Activa el modo admin para editar cuentos, frases y configuraciones.
-        </p>
-      </section>
+      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+        {loadError}
+      </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-600">
-          Editor de sincronización
-        </p>
-        <div className="mt-4 space-y-3">
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-slate-700">Título del cuento</span>
-            <input
-              type="text"
-              value={titleDraft}
-              onChange={(event) => setTitleDraft(event.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
-            />
-          </label>
+    <div className="pb-44">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <Link to="/" className="text-sm font-semibold text-slate-500 hover:text-slate-800">
+            ← Cuentos
+          </Link>
+          <h2 className="truncate text-2xl font-extrabold tracking-tight">
+            {titleDraft || 'Sin título'}
+          </h2>
+        </div>
+        <span
+          className={[
+            'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold',
+            errorMessage
+              ? 'bg-rose-100 text-rose-700'
+              : pendingSaves > 0
+                ? 'bg-slate-100 text-slate-500'
+                : 'bg-emerald-100 text-emerald-700',
+          ].join(' ')}
+        >
+          {errorMessage ? (
+            'Error al guardar'
+          ) : pendingSaves > 0 ? (
+            'Guardando...'
+          ) : (
+            <>
+              <CheckIcon className="h-3.5 w-3.5" />
+              Guardado
+            </>
+          )}
+        </span>
+      </div>
 
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={handleTitleSave}
-              disabled={isSavingTitle}
-              className="inline-flex rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              {isSavingTitle ? 'Guardando título...' : 'Guardar título'}
-            </button>
-            <button
-              type="button"
-              onClick={handleDownload}
-              disabled={isDownloading}
-              className="inline-flex rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
-            >
-              {isDownloading ? 'Preparando archivo...' : 'Descargar .cuento'}
-            </button>
-            {!story?.isInCatalog || story?.isLocal ? (
+      {errorMessage ? (
+        <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700">
+          {errorMessage}
+        </div>
+      ) : null}
+
+      <div className="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
+        <section className="order-1 space-y-3 lg:order-2">
+          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-bold">Marcar tiempos</h3>
+              <span className="text-sm font-semibold tabular-nums text-slate-500">
+                {markedCount} de {segments.length}
+              </span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-violet-500 transition-all" style={{ width: `${progressPercent}%` }} />
+            </div>
+            <p className="mt-3 text-sm text-slate-600">
+              Dale play y tocá <strong>Siguiente frase</strong> justo cuando empieza
+              cada una. Si te pasaste, volvé {REWIND_SECONDS} segundos y tocá de nuevo.
+              Tocando una frase marcada la escuchás desde ahí.
+            </p>
+            <p className="mt-2 hidden text-xs text-slate-400 sm:block">
+              Teclado: espacio = play/pausa · → o Enter = siguiente frase · ← = volver {REWIND_SECONDS} s
+            </p>
+          </div>
+
+          <ol className="space-y-2">
+            {segments.map((segment, index) => (
+              <SentenceRow
+                key={segment.id}
+                segment={segment}
+                index={index}
+                isActive={activeSegment?.id === segment.id}
+                isNext={index === nextIndex}
+                isEditing={editingIndex === index}
+                onSeek={() => {
+                  seekTo(segment.start_time)
+                  audio.play()
+                }}
+                onStartEditing={() => setEditingIndex(index)}
+                onSave={(changes) => handleSegmentSave(index, changes)}
+                onCancel={() => setEditingIndex(null)}
+                rowRef={(element) => {
+                  rowRefs.current[segment.id] = element
+                }}
+              />
+            ))}
+          </ol>
+        </section>
+
+        <aside className="order-2 space-y-4 lg:sticky lg:top-20 lg:order-1 lg:self-start">
+          <div className="space-y-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+            <h3 className="font-bold">Datos del cuento</h3>
+            <label className="flex cursor-pointer items-center gap-3">
+              <StoryCover
+                src={story.cover_image_url}
+                title={titleDraft}
+                seed={story.id}
+                className="h-20 w-20 shrink-0 rounded-xl"
+              />
+              <span className="text-sm font-semibold text-violet-700">
+                {story.cover_image_url ? 'Cambiar portada' : 'Agregar portada'}
+              </span>
+              <input type="file" accept="image/*" onChange={handleCoverChange} className="sr-only" />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-bold text-slate-500">Título</span>
+              <input
+                type="text"
+                value={titleDraft}
+                onChange={(event) => handleDetailsChange(event.target.value, narratorDraft)}
+                className={inputClassName}
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-bold text-slate-500">Leído por</span>
+              <input
+                type="text"
+                value={narratorDraft}
+                onChange={(event) => handleDetailsChange(titleDraft, event.target.value)}
+                placeholder="la abuela, el tío Juan..."
+                className={inputClassName}
+              />
+            </label>
+          </div>
+
+          <div className="space-y-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+            <h3 className="font-bold">Guardar y publicar</h3>
+            <p className="text-sm text-slate-600">{getPublishMessage(story)}</p>
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={handleDeleteStory}
-                disabled={isDeletingStory}
-                className="inline-flex rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-rose-300"
+                onClick={handleDownload}
+                disabled={isDownloading}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300"
               >
-                {isDeletingStory
-                  ? 'Borrando...'
-                  : story?.isInCatalog
-                    ? 'Descartar cambios'
-                    : 'Borrar cuento'}
+                <DownloadIcon className="h-4 w-4" />
+                {isDownloading ? 'Preparando...' : 'Descargar .cuento'}
+              </button>
+              <Link
+                to={`/player/${story.id}`}
+                className="inline-flex items-center rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300"
+              >
+                Ver como Aurora
+              </Link>
+            </div>
+            {!story.isInCatalog || story.isLocal ? (
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-rose-600 hover:text-rose-800"
+              >
+                <TrashIcon className="h-4 w-4" />
+                {story.isInCatalog ? 'Descartar cambios' : 'Borrar cuento'}
               </button>
             ) : null}
           </div>
-        </div>
+        </aside>
+      </div>
 
-        <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          {story?.isInCatalog
-            ? story?.isLocal
-              ? 'Este cuento está publicado y tiene cambios guardados solo en este dispositivo. Para publicarlos, descarga el .cuento y reemplaza el archivo en public/cuentos.'
-              : 'Este cuento está publicado. Lo que cambies se guarda en este dispositivo; para publicarlo, descarga el .cuento y reemplaza el archivo en public/cuentos.'
-            : 'Este cuento existe solo en este dispositivo. Descarga el .cuento para guardarlo, compartirlo o publicarlo en public/cuentos.'}
-        </div>
-
-        <p className="mt-5 text-sm text-slate-600 sm:text-base">
-          Reproduce el audio y haz clic en cada frase cuando empiece. La frase
-          anterior se cerrará automáticamente en ese mismo instante.
-        </p>
-
-        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
-          <div className="rounded-3xl bg-slate-50 p-5 ring-1 ring-slate-200">
-            <StoryCover
-              src={story?.cover_image_url}
-              title={story?.title}
-              className="h-56 w-full rounded-3xl"
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur">
+        <div className="mx-auto max-w-6xl space-y-2 px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3 text-xs font-semibold tabular-nums text-slate-500">
+            <span>{formatTime(audio.currentTime)}</span>
+            <input
+              type="range"
+              min={0}
+              max={audio.duration || 0}
+              step={0.1}
+              value={audio.currentTime}
+              onChange={(event) => seekTo(Number(event.target.value))}
+              aria-label="Posición del audio"
+              className="flex-1 accent-violet-600"
             />
-
-            <div className="mt-5">
-              <h3 className="text-lg font-semibold tracking-tight text-slate-900">
-                Portada del cuento
-              </h3>
-              <p className="mt-2 text-sm text-slate-600">
-                Agrega o reemplaza la portada que se usa en la biblioteca y en el reproductor.
-              </p>
-
-              <div className="mt-4 space-y-3">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleCoverImageChange}
-                  className="block w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-4 text-sm text-slate-600 file:mr-4 file:rounded-full file:border-0 file:bg-sky-600 file:px-4 file:py-2 file:font-medium file:text-white hover:file:bg-sky-700"
-                />
-
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    onClick={handleCoverImageSave}
-                    disabled={!coverImageFile || isSavingCover}
-                    className="inline-flex rounded-2xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300"
-                  >
-                    {isSavingCover ? 'Guardando portada...' : 'Guardar portada'}
-                  </button>
-
-                  {coverImageFile ? (
-                    <span className="inline-flex items-center rounded-2xl bg-white px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200">
-                      {coverImageFile.name}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+            <span>{formatTime(audio.duration)}</span>
           </div>
 
-          <div className="rounded-3xl bg-slate-50 p-5 ring-1 ring-slate-200">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-medium text-slate-600">Tiempo actual</p>
-                <p className="mt-1 text-3xl font-semibold tracking-tight text-slate-900">
-                  {formatTime(currentTime)}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={togglePlayback}
-                className="inline-flex min-w-32 items-center justify-center rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800"
-              >
-                {isPlaying ? 'Pausar audio' : 'Reproducir audio'}
-              </button>
-            </div>
-
-            <div className="mt-5 rounded-2xl bg-white p-4 text-sm text-slate-600 ring-1 ring-slate-200">
-              <p>
-                Frase activa:{' '}
-                <span className="font-medium text-slate-900">
-                  {activeSegment?.text || 'Todavía no hay una frase que coincida con el tiempo actual.'}
+          <div className="flex items-stretch gap-2">
+            <button
+              type="button"
+              onClick={rewind}
+              aria-label={`Volver ${REWIND_SECONDS} segundos`}
+              className="flex w-14 shrink-0 flex-col items-center justify-center rounded-2xl bg-slate-100 text-slate-700 transition active:scale-95"
+            >
+              <BackIcon className="h-5 w-5" />
+              <span className="text-[0.65rem] font-bold">{REWIND_SECONDS} s</span>
+            </button>
+            <button
+              type="button"
+              onClick={audio.toggle}
+              disabled={!audio.isReady}
+              aria-label={audio.isPlaying ? 'Pausar' : 'Reproducir'}
+              className="flex w-16 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white transition active:scale-95 disabled:opacity-50"
+            >
+              {audio.isPlaying ? <PauseIcon className="h-7 w-7" /> : <PlayIcon className="ml-0.5 h-7 w-7" />}
+            </button>
+            <button
+              type="button"
+              onClick={markNextSegment}
+              disabled={!nextSegment || !audio.isReady}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl bg-violet-600 px-4 py-3 text-left text-white transition active:scale-[0.98] disabled:bg-slate-200 disabled:text-slate-500"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-base font-extrabold">
+                  {nextSegment ? `Siguiente frase (${nextIndex + 1})` : 'Todas marcadas'}
                 </span>
-              </p>
-            </div>
-
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={isSaving}
-                className="inline-flex rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-violet-300"
-              >
-                {isSaving ? 'Guardando...' : 'Guardar tiempos'}
-              </button>
-
-              <Link
-                to={`/player/${storyId}`}
-                className="inline-flex rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-              >
-                Abrir reproductor
-              </Link>
-
-              <Link
-                to="/"
-                className="inline-flex rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-              >
-                Volver a la biblioteca
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        {errorMessage ? (
-          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-            {errorMessage}
-          </div>
-        ) : null}
-
-        {saveMessage ? (
-          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-            {saveMessage}
-          </div>
-        ) : null}
-      </section>
-
-      <section className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5">
-        <div className="mb-4 flex items-center justify-between gap-4 px-2">
-          <div>
-            <h3 className="text-xl font-semibold tracking-tight text-slate-900">
-              Frases del cuento
-            </h3>
-            <p className="mt-1 text-sm text-slate-600">
-              Haz clic en cada frase mientras suena el audio para asignar su inicio.
-            </p>
-          </div>
-          <div className="rounded-full bg-slate-100 px-3 py-2 text-sm font-medium text-slate-600">
-            {segments.length} en total
-          </div>
-        </div>
-
-        <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
-          {segments.map((segment, index) => {
-            const isActive = activeSegment?.id === segment.id
-            const isSelected = selectedSegmentId === segment.id
-
-            return (
-              <button
-                key={segment.id}
-                type="button"
-                onClick={() => handleSegmentClick(index)}
-                ref={(element) => {
-                  if (element) {
-                    segmentRefs.current[segment.id] = element
-                  }
-                }}
-                className={[
-                  'block w-full rounded-3xl border p-4 text-left transition',
-                  isActive
-                    ? 'border-violet-300 bg-violet-50 shadow-sm'
-                    : isSelected
-                      ? 'border-sky-300 bg-sky-50'
-                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50',
-                ].join(' ')}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">
-                      Segmento {index + 1}
-                    </p>
-                    {editingSegmentId === segment.id ? (
-                      <div className="mt-2 space-y-3">
-                        <textarea
-                          value={segment.text}
-                          onChange={(event) =>
-                            handleSegmentTextChange(index, event.target.value)
-                          }
-                          rows={3}
-                          onClick={(event) => event.stopPropagation()}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base leading-7 text-slate-900 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              handleSegmentTextSave(segment.id, segment.text)
-                            }}
-                            className="inline-flex rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
-                          >
-                            Guardar texto
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setEditingSegmentId(null)
-                            }}
-                            className="inline-flex rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-2 space-y-3">
-                        <p className="text-lg leading-8 text-slate-900">{segment.text}</p>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            setEditingSegmentId(segment.id)
-                          }}
-                          className="inline-flex rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-                        >
-                          Editar texto
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="min-w-40 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
-                    <label className="block">
-                      <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                        Inicio
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={segment.start_time ?? ''}
-                        onChange={(event) =>
-                          handleManualStartTimeChange(index, event.target.value)
-                        }
-                        onClick={(event) => event.stopPropagation()}
-                        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
-                      />
-                    </label>
-                    <p className="mt-2 text-xs text-slate-500">
-                      {typeof segment.start_time === 'number'
-                        ? `${segment.start_time.toFixed(2)}s`
-                        : 'Sin definir'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-500">
-                  <span className="rounded-full bg-slate-100 px-3 py-1">
-                    Inicio:{' '}
-                    {typeof segment.start_time === 'number'
-                      ? `${segment.start_time.toFixed(2)}s`
-                      : 'sin definir'}
+                {nextSegment ? (
+                  <span className="story-text block truncate text-sm opacity-80">
+                    {nextSegment.text}
                   </span>
-                  <span className="rounded-full bg-slate-100 px-3 py-1">
-                    Fin:{' '}
-                    {typeof segment.end_time === 'number'
-                      ? `${segment.end_time.toFixed(2)}s`
-                      : 'abierto'}
-                  </span>
-                </div>
-              </button>
-            )
-          })}
+                ) : null}
+              </span>
+              <NextIcon className="h-6 w-6 shrink-0" />
+            </button>
+          </div>
         </div>
-      </section>
+      </div>
     </div>
   )
 }

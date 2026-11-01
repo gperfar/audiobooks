@@ -1,8 +1,7 @@
-import { createContext, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { AdminModeContext } from './adminModeContext.js'
 
 const ADMIN_MODE_STORAGE_KEY = 'audiolibros-admin-mode'
-
-const AdminModeContext = createContext(null)
 
 function readStoredAdminMode() {
   if (typeof window === 'undefined') {
@@ -30,5 +29,3 @@ export function AdminModeProvider({ children }) {
 
   return <AdminModeContext value={value}>{children}</AdminModeContext>
 }
-
-export { AdminModeContext }

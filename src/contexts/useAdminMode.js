@@ -1,5 +1,5 @@
 import { useContext } from 'react'
-import { AdminModeContext } from './AdminModeContext.jsx'
+import { AdminModeContext } from './adminModeContext.js'
 
 export function useAdminMode() {
   const context = useContext(AdminModeContext)

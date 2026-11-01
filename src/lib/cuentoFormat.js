@@ -49,7 +49,14 @@ export function getSegmentStats(segments) {
   }
 }
 
-export function createManifest({ id, title, audioFileName, coverFileName, sentences }) {
+export function createManifest({
+  id,
+  title,
+  narrator,
+  audioFileName,
+  coverFileName,
+  sentences,
+}) {
   const now = new Date().toISOString()
 
   return {
@@ -57,6 +64,7 @@ export function createManifest({ id, title, audioFileName, coverFileName, senten
     version: CUENTO_VERSION,
     id,
     title,
+    narrator: narrator || null,
     createdAt: now,
     updatedAt: now,
     audio: audioFileName,

@@ -71,6 +71,7 @@ export function buildCuentosCatalog() {
     stories.push({
       id: manifest.id,
       title: manifest.title,
+      narrator: manifest.narrator ?? null,
       createdAt: manifest.createdAt,
       file: `cuentos/${encodeURIComponent(fileName)}?v=${version}`,
       cover: coverPath,

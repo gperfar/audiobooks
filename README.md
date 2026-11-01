@@ -4,25 +4,33 @@ Aplicacion web sencilla para crear una biblioteca de cuentos con audio, sincroni
 
 Es 100% estatica: no hay servidor, base de datos ni cuentas. Cada cuento es un archivo `.cuento` autocontenido, y los cuentos publicados viven en el propio repo.
 
-## Que hace la app
+## Modos
 
-- muestra una biblioteca con los cuentos publicados y los guardados en el dispositivo
-- permite alternar entre `modo lectura` y `modo admin`
-- deja crear cuentos con audio, texto y portada opcional
-- separa el cuento en frases automaticamente
-- permite sincronizar cada frase con el audio
-- permite editar titulo, portada y texto de segmentos
-- exporta e importa archivos `.cuento`
-- reproduce el cuento con texto destacado y desplazamiento automatico
-- cuenta las escuchas (por dispositivo)
-- se puede instalar en la pantalla de inicio del celular o la tablet
+### Modo Aurora (por defecto)
+
+Pensado para una nena que todavia no lee:
+
+- grilla de portadas grandes; tocar una abre el cuento
+- solo aparecen los cuentos con todos los tiempos marcados
+- el reproductor muestra una frase a la vez, grande, con una letra pensada para primeros lectores (Andika)
+- boton grande de play/pausa, barra de progreso sin saltos accidentales, pantalla siempre encendida mientras suena
+- los cuentos sin portada muestran una tapa de color con la primera letra del titulo
+
+Para entrar al modo admin hay que mantener apretado el candado de arriba a la derecha unos 2 segundos.
+
+### Modo admin
+
+- lista de cuentos con su estado (listo para Aurora, frases sin marcar, publicado o solo en este dispositivo)
+- crear cuentos con titulo, "leido por", audio, portada opcional y texto
+- editor para marcar tiempos, editar frases, titulo, narrador y portada (todo se guarda solo)
+- exportar e importar archivos `.cuento`
 
 ## Stack tecnico
 
 - React + Vite
 - Tailwind CSS
 - React Router (con `HashRouter`, para funcionar en cualquier hosting estatico)
-- Howler.js
+- Fuentes Nunito (interfaz) y Andika (texto de los cuentos), incluidas en el build
 - fflate (zip) + IndexedDB
 
 ## El formato `.cuento`
@@ -43,6 +51,7 @@ Ejemplo de `manifest.json`:
   "version": 1,
   "id": "3440e5c8-17ce-43b7-a8fd-ed60d8f73c90",
   "title": "El dragon dormilon",
+  "narrator": "la abuela",
   "createdAt": "2026-10-31T12:00:00.000Z",
   "updatedAt": "2026-10-31T12:00:00.000Z",
   "audio": "audio.m4a",
@@ -71,8 +80,8 @@ La app pide almacenamiento persistente (`navigator.storage.persist()`). En iPhon
 
 1. `npm run dev` y activa `Modo admin`
 2. `Crear cuento`: titulo, audio, portada opcional y texto
-3. En el editor, reproduce el audio y haz clic en cada frase cuando empieza
-4. `Guardar tiempos` y corrige texto o titulo si hace falta
+3. En el editor, dale play y toca `Siguiente frase` justo cuando empieza cada una (en la compu: espacio = play/pausa, flecha derecha o Enter = siguiente frase, flecha izquierda = volver 3 s)
+4. Si una frase quedo mal marcada, volve unos segundos y tocala de nuevo, o editala con el lapiz
 5. `Descargar .cuento`
 6. Copia el archivo a `public/cuentos/`, commitea y pushea
 
@@ -141,7 +150,7 @@ Se asume flujo secuencial:
 
 ### Modo admin
 
-Es solo un interruptor guardado en `localStorage` que muestra u oculta las opciones de edicion. No protege nada, porque no hay nada en un servidor: lo publicado solo cambia con un push al repo.
+Es solo un interruptor guardado en `localStorage`, escondido detras de una pulsacion larga para que una nena no lo active sin querer. No protege nada, porque no hay nada en un servidor: lo publicado solo cambia con un push al repo.
 
 ## Pendiente
 

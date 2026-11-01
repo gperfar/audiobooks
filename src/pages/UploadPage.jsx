@@ -1,57 +1,79 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ImageIcon, MusicIcon } from '../components/Icons.jsx'
 import { createStory } from '../lib/storyApi.js'
-import { useAdminMode } from '../contexts/useAdminMode.js'
 import { splitStoryIntoSentences } from '../utils/sentenceSplit.js'
 
 const emptyForm = {
   title: '',
+  narrator: '',
   storyText: '',
   audioFile: null,
   coverImageFile: null,
 }
 
+const inputClassName =
+  'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100'
+
+function Field({ label, hint, children }) {
+  return (
+    <label className="block space-y-1.5">
+      <span className="text-sm font-bold text-slate-700">{label}</span>
+      {children}
+      {hint ? <span className="block text-xs text-slate-500">{hint}</span> : null}
+    </label>
+  )
+}
+
+// Styled replacement for the native file input, whose label can't be translated.
+function FilePicker({ accept, file, onChange, icon, emptyLabel, preview }) {
+  return (
+    <span className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-white p-3 transition hover:border-violet-400 hover:bg-violet-50/40">
+      {preview ?? (
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
+          {icon}
+        </span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-semibold text-slate-800">
+          {file ? file.name : emptyLabel}
+        </span>
+        <span className="block text-xs text-slate-500">
+          {file ? 'Tocá para cambiarlo' : 'Tocá para elegir'}
+        </span>
+      </span>
+      <input
+        type="file"
+        accept={accept}
+        onChange={(event) => onChange(event.target.files?.[0] ?? null)}
+        className="sr-only"
+      />
+    </span>
+  )
+}
+
+function useObjectUrl(file) {
+  const url = useMemo(() => (file ? URL.createObjectURL(file) : null), [file])
+
+  useEffect(() => () => url && URL.revokeObjectURL(url), [url])
+
+  return url
+}
+
 export function UploadPage() {
   const navigate = useNavigate()
-  const { isAdminMode } = useAdminMode()
   const [formData, setFormData] = useState(emptyForm)
   const [errorMessage, setErrorMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const coverPreviewUrl = useObjectUrl(formData.coverImageFile)
 
-  const sentencePreview = useMemo(
+  const sentences = useMemo(
     () => splitStoryIntoSentences(formData.storyText),
     [formData.storyText],
   )
 
-  if (!isAdminMode) {
-    return (
-      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
-          Esta sección es solo para administración
-        </h2>
-        <p className="mt-3 text-sm text-slate-600 sm:text-base">
-          Activa el modo admin para subir cuentos nuevos y configurar la biblioteca.
-        </p>
-      </section>
-    )
-  }
-
-  function handleTextChange(event) {
-    const { name, value } = event.target
+  function updateField(name, value) {
     setFormData((current) => ({ ...current, [name]: value }))
-  }
-
-  function handleAudioChange(event) {
-    const [audioFile] = event.target.files ?? []
-    setFormData((current) => ({ ...current, audioFile: audioFile ?? null }))
-  }
-
-  function handleCoverImageChange(event) {
-    const [coverImageFile] = event.target.files ?? []
-    setFormData((current) => ({
-      ...current,
-      coverImageFile: coverImageFile ?? null,
-    }))
   }
 
   async function handleSubmit(event) {
@@ -59,17 +81,17 @@ export function UploadPage() {
     setErrorMessage('')
 
     if (!formData.title.trim()) {
-      setErrorMessage('Agrega un título antes de subir el cuento.')
+      setErrorMessage('Falta el título del cuento.')
       return
     }
 
     if (!formData.audioFile) {
-      setErrorMessage('Elige un archivo de audio para continuar.')
+      setErrorMessage('Falta elegir el audio.')
       return
     }
 
-    if (sentencePreview.length === 0) {
-      setErrorMessage('Pega el texto del cuento para separarlo en frases.')
+    if (sentences.length === 0) {
+      setErrorMessage('Falta pegar el texto del cuento.')
       return
     }
 
@@ -78,140 +100,115 @@ export function UploadPage() {
     try {
       const story = await createStory({
         title: formData.title.trim(),
+        narrator: formData.narrator.trim(),
         audioFile: formData.audioFile,
         coverImageFile: formData.coverImageFile,
-        sentences: sentencePreview,
+        sentences,
       })
 
-      setFormData(emptyForm)
       navigate(`/editor/${story.id}`)
     } catch (error) {
-      setErrorMessage(error.message || 'Ocurrió un problema al guardar el cuento.')
-    } finally {
+      setErrorMessage(error.message || 'No se pudo guardar el cuento.')
       setIsSubmitting(false)
     }
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,24rem)]">
-      <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-6">
-        <div className="mb-6">
-          <h2 className="text-2xl font-semibold tracking-tight">Crear un nuevo cuento</h2>
-          <p className="mt-2 text-sm text-slate-600 sm:text-base">
-            Agrega un título, elige el audio y pega el cuento completo. La app
-            separará el texto en frases para sincronizarlo en la siguiente pantalla.
-            Todo se guarda en este dispositivo hasta que descargues el archivo
-            .cuento desde el editor.
-          </p>
-        </div>
-
-        {errorMessage ? (
-          <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-            {errorMessage}
-          </div>
-        ) : null}
-
-        <form className="space-y-6" onSubmit={handleSubmit}>
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-slate-700">Título del cuento</span>
-            <input
-              type="text"
-              name="title"
-              value={formData.title}
-              onChange={handleTextChange}
-              placeholder="El dragón muy dormilón"
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
-            />
-          </label>
-
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-slate-700">Archivo de audio</span>
-            <input
-              type="file"
-              accept="audio/*"
-              onChange={handleAudioChange}
-              className="block w-full rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-600 file:mr-4 file:rounded-full file:border-0 file:bg-violet-600 file:px-4 file:py-2 file:font-medium file:text-white hover:file:bg-violet-700"
-            />
-            <p className="text-xs text-slate-500">
-              Usa una sola pista de audio para todo el cuento.
-            </p>
-          </label>
-
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-slate-700">
-              Imagen de portada
-            </span>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleCoverImageChange}
-              className="block w-full rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-600 file:mr-4 file:rounded-full file:border-0 file:bg-sky-600 file:px-4 file:py-2 file:font-medium file:text-white hover:file:bg-sky-700"
-            />
-            <p className="text-xs text-slate-500">
-              Opcional. La portada aparecerá en la biblioteca y en el reproductor.
-            </p>
-          </label>
-
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-slate-700">Texto del cuento</span>
-            <textarea
-              name="storyText"
-              value={formData.storyText}
-              onChange={handleTextChange}
-              rows={12}
-              placeholder="Había una vez un dragón que bostezó. Buscó una cueva cómoda. Luego encontró la almohada perfecta."
-              className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
-            />
-            <p className="text-xs text-slate-500">
-              Las frases se separan con una expresión regular simple basada en puntuación.
-            </p>
-          </label>
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 sm:w-auto"
-          >
-            {isSubmitting ? 'Guardando cuento...' : 'Crear cuento y continuar'}
-          </button>
-        </form>
-      </section>
-
-      <aside className="rounded-3xl bg-slate-900 p-5 text-white shadow-sm sm:p-6">
-        <h2 className="text-xl font-semibold tracking-tight">Vista previa de frases</h2>
-        <p className="mt-2 text-sm text-slate-300">
-          Esta es la lista de segmentos que tendrá el cuento.
+    <form onSubmit={handleSubmit} className="mx-auto max-w-2xl space-y-6">
+      <div>
+        <h2 className="text-2xl font-extrabold tracking-tight">Nuevo cuento</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Cargá el audio y el texto. En el paso siguiente marcás cuándo empieza
+          cada frase.
         </p>
+      </div>
 
-        <div className="mt-6 rounded-3xl bg-white/8 p-4">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-slate-300">Segmentos</span>
-            <span className="rounded-full bg-white/10 px-3 py-1 font-medium text-white">
-              {sentencePreview.length}
-            </span>
-          </div>
+      <div className="space-y-5 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+        <Field label="Título">
+          <input
+            type="text"
+            value={formData.title}
+            onChange={(event) => updateField('title', event.target.value)}
+            placeholder="El dragón dormilón"
+            className={inputClassName}
+          />
+        </Field>
 
-          <div className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
-            {sentencePreview.length > 0 ? (
-              sentencePreview.map((sentence, index) => (
-                <div
-                  key={`${index}-${sentence}`}
-                  className="rounded-2xl border border-white/10 bg-white/6 p-3"
-                >
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-violet-200">
-                    Segmento {index + 1}
-                  </p>
-                  <p className="text-sm leading-6 text-slate-100">{sentence}</p>
-                </div>
-              ))
-            ) : (
-              <div className="rounded-2xl border border-dashed border-white/15 p-5 text-sm text-slate-300">
-                Pega el texto del cuento para ver las frases generadas.
-              </div>
-            )}
-          </div>
+        <Field label="¿Quién lo lee?" hint="Opcional. Aurora lo ve como “Leído por…”.">
+          <input
+            type="text"
+            value={formData.narrator}
+            onChange={(event) => updateField('narrator', event.target.value)}
+            placeholder="la abuela, el tío Juan, mamá..."
+            className={inputClassName}
+          />
+        </Field>
+
+        <Field label="Audio">
+          <FilePicker
+            accept="audio/*"
+            file={formData.audioFile}
+            onChange={(file) => updateField('audioFile', file)}
+            icon={<MusicIcon className="h-6 w-6" />}
+            emptyLabel="Elegir el audio del cuento"
+          />
+        </Field>
+
+        <Field label="Portada" hint="Opcional. Si no hay, se usa una de color con la primera letra.">
+          <FilePicker
+            accept="image/*"
+            file={formData.coverImageFile}
+            onChange={(file) => updateField('coverImageFile', file)}
+            icon={<ImageIcon className="h-6 w-6" />}
+            emptyLabel="Elegir una imagen"
+            preview={
+              coverPreviewUrl ? (
+                <img src={coverPreviewUrl} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+              ) : null
+            }
+          />
+        </Field>
+
+        <Field
+          label="Texto"
+          hint="Se separa en frases por los puntos y los signos de pregunta y exclamación."
+        >
+          <textarea
+            value={formData.storyText}
+            onChange={(event) => updateField('storyText', event.target.value)}
+            rows={10}
+            placeholder="Había una vez un dragón que bostezó. Buscó una cueva cómoda..."
+            className={`${inputClassName} story-text leading-relaxed`}
+          />
+        </Field>
+
+        {sentences.length > 0 ? (
+          <details className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200">
+            <summary className="cursor-pointer text-sm font-bold text-slate-700">
+              {sentences.length} {sentences.length === 1 ? 'frase' : 'frases'} — ver cómo quedan
+            </summary>
+            <ol className="story-text mt-3 list-decimal space-y-1.5 pl-6 text-slate-700">
+              {sentences.map((sentence, index) => (
+                <li key={`${index}-${sentence}`}>{sentence}</li>
+              ))}
+            </ol>
+          </details>
+        ) : null}
+      </div>
+
+      {errorMessage ? (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700">
+          {errorMessage}
         </div>
-      </aside>
-    </div>
+      ) : null}
+
+      <button
+        type="submit"
+        disabled={isSubmitting}
+        className="w-full rounded-xl bg-violet-600 px-5 py-4 text-base font-bold text-white transition hover:bg-violet-700 disabled:bg-violet-300"
+      >
+        {isSubmitting ? 'Guardando...' : 'Guardar y marcar tiempos'}
+      </button>
+    </form>
   )
 }

@@ -123,7 +123,17 @@ async function loadStoryRecord(storyId) {
   }
 }
 
-async function updateStoryRecord(storyId, applyChanges) {
+// Edits are read-modify-write on the whole record, so run them one at a time:
+// with autosave, a title save and a timing save can overlap.
+let writeQueue = Promise.resolve()
+
+function updateStoryRecord(storyId, applyChanges) {
+  const result = writeQueue.then(() => applyStoryRecordUpdate(storyId, applyChanges))
+  writeQueue = result.catch(() => {})
+  return result
+}
+
+async function applyStoryRecordUpdate(storyId, applyChanges) {
   const record = await loadStoryRecord(storyId)
   const changes = applyChanges(record)
   const nextRecord = {
@@ -210,6 +220,7 @@ export async function getAllStoriesWithSegmentStats() {
     stories.push({
       id: entry.id,
       title: entry.title,
+      narrator: entry.narrator ?? null,
       created_at: entry.createdAt,
       cover_image_url: entry.cover ? resolveAssetUrl(entry.cover) : null,
       listen_count: getListenCount(entry.id),
@@ -236,6 +247,7 @@ export async function getAllStoriesWithSegmentStats() {
     stories.push({
       id: record.id,
       title: record.manifest.title,
+      narrator: record.manifest.narrator ?? null,
       created_at: record.manifest.createdAt,
       cover_image_url: createObjectUrl(`${record.id}:cover`, record.cover),
       listen_count: getListenCount(record.id),
@@ -256,6 +268,7 @@ export async function fetchStoryWithSegments(storyId) {
   return {
     id: record.id,
     title: manifest.title,
+    narrator: manifest.narrator ?? null,
     audio_url: createObjectUrl(`${record.id}:audio`, record.audio),
     audio_format: getFileExtension(manifest.audio),
     cover_image_url: createObjectUrl(`${record.id}:cover`, record.cover),
@@ -273,7 +286,13 @@ export async function fetchStoryWithSegments(storyId) {
   }
 }
 
-export async function createStory({ title, audioFile, coverImageFile, sentences }) {
+export async function createStory({
+  title,
+  narrator,
+  audioFile,
+  coverImageFile,
+  sentences,
+}) {
   const id = crypto.randomUUID()
   const audioFileName = `audio.${getFileExtension(audioFile.name) || 'mp3'}`
   const coverFileName = coverImageFile
@@ -283,7 +302,14 @@ export async function createStory({ title, audioFile, coverImageFile, sentences 
   await putStoredStory({
     id,
     kind: 'local',
-    manifest: createManifest({ id, title, audioFileName, coverFileName, sentences }),
+    manifest: createManifest({
+      id,
+      title,
+      narrator,
+      audioFileName,
+      coverFileName,
+      sentences,
+    }),
     audio: new Blob([audioFile], { type: getMimeType(audioFileName) }),
     cover: coverImageFile
       ? new Blob([coverImageFile], { type: getMimeType(coverFileName) })
@@ -294,9 +320,11 @@ export async function createStory({ title, audioFile, coverImageFile, sentences 
   return { id }
 }
 
-export async function updateStoryTitle(storyId, title) {
-  await updateStoryRecord(storyId, () => ({ manifest: { title } }))
-  return { id: storyId, title, isLocal: true }
+export async function updateStoryDetails(storyId, { title, narrator }) {
+  await updateStoryRecord(storyId, () => ({
+    manifest: { title, narrator: narrator || null },
+  }))
+  return { id: storyId, title, narrator: narrator || null, isLocal: true }
 }
 
 export async function updateStoryCoverImage(storyId, coverImageFile) {

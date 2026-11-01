@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { FileIcon, PlusIcon } from '../components/Icons.jsx'
 import { StoryCover } from '../components/StoryCover.jsx'
 import { useAdminMode } from '../contexts/useAdminMode.js'
 import {
@@ -7,7 +8,112 @@ import {
   importStoryFile,
 } from '../lib/storyApi.js'
 
-function OpenStoryFileButton({ className }) {
+function useStories() {
+  const [stories, setStories] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState('')
+
+  useEffect(() => {
+    let isMounted = true
+
+    getAllStoriesWithSegmentStats()
+      .then((data) => {
+        if (isMounted) {
+          setStories(data)
+        }
+      })
+      .catch((error) => {
+        if (isMounted) {
+          setErrorMessage(error.message || 'No se pudieron cargar los cuentos.')
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoading(false)
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  return { stories, isLoading, errorMessage }
+}
+
+export function HomePage() {
+  const { isAdminMode } = useAdminMode()
+  const { stories, isLoading, errorMessage } = useStories()
+
+  if (isLoading) {
+    return <p className="py-16 text-center text-slate-500">Cargando cuentos...</p>
+  }
+
+  if (errorMessage) {
+    return (
+      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+        {errorMessage}
+      </div>
+    )
+  }
+
+  return isAdminMode ? (
+    <AdminLibrary stories={stories} />
+  ) : (
+    <AuroraLibrary stories={stories.filter((story) => story.isSynced)} />
+  )
+}
+
+// --- Aurora mode --------------------------------------------------------------
+
+function AuroraLibrary({ stories }) {
+  if (stories.length === 0) {
+    return (
+      <div className="mx-auto mt-10 max-w-md rounded-[2rem] bg-white/70 p-8 text-center shadow-sm">
+        <p className="story-text text-2xl font-bold text-amber-950">
+          Todavía no hay cuentos
+        </p>
+        <p className="mt-3 text-sm text-amber-900/70">
+          Para agregar uno, mantené apretado el candado de arriba.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 lg:grid-cols-4">
+      {stories.map((story) => (
+        <li key={story.id}>
+          <Link
+            to={`/player/${story.id}`}
+            className="block h-full overflow-hidden rounded-[1.75rem] bg-white shadow-md ring-1 ring-amber-900/5 transition active:scale-95 sm:hover:-translate-y-1 sm:hover:shadow-lg"
+          >
+            <StoryCover
+              src={story.cover_image_url}
+              title={story.title}
+              seed={story.id}
+              className="aspect-square w-full"
+            />
+            <div className="px-3 pb-4 pt-3 sm:px-4">
+              <p className="story-text text-lg font-bold leading-snug text-slate-900 sm:text-xl">
+                {story.title}
+              </p>
+              {story.narrator ? (
+                <p className="mt-1 text-sm font-semibold text-amber-800">
+                  Leído por {story.narrator}
+                </p>
+              ) : null}
+            </div>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// --- Admin mode ---------------------------------------------------------------
+
+function OpenStoryFileButton() {
   const navigate = useNavigate()
   const inputRef = useRef(null)
   const [isImporting, setIsImporting] = useState(false)
@@ -26,7 +132,7 @@ function OpenStoryFileButton({ className }) {
 
     try {
       const story = await importStoryFile(file)
-      navigate(`/player/${story.id}`)
+      navigate(`/editor/${story.id}`)
     } catch (error) {
       setErrorMessage(error.message || 'No se pudo abrir el archivo.')
       setIsImporting(false)
@@ -34,52 +140,47 @@ function OpenStoryFileButton({ className }) {
   }
 
   return (
-    <div className="space-y-2">
+    <>
       {/* No accept filter: iOS greys out unknown extensions like .cuento. */}
-      <input
-        ref={inputRef}
-        type="file"
-        onChange={handleFileChange}
-        className="hidden"
-      />
+      <input ref={inputRef} type="file" onChange={handleFileChange} className="hidden" />
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={isImporting}
-        className={className}
+        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-60"
       >
-        {isImporting ? 'Abriendo...' : 'Abrir archivo .cuento'}
+        <FileIcon className="h-4 w-4" />
+        {isImporting ? 'Abriendo...' : 'Abrir .cuento'}
       </button>
       {errorMessage ? (
-        <p className="text-sm text-rose-700">{errorMessage}</p>
+        <p className="w-full text-sm text-rose-700">{errorMessage}</p>
       ) : null}
-    </div>
+    </>
   )
 }
 
-const secondaryButtonClassName =
-  'inline-flex rounded-2xl border border-slate-200 bg-white px-5 py-4 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60'
-
-function getDeviceBadge(story) {
-  if (!story.isLocal) {
-    return null
+function getSyncStatus(story) {
+  if (story.isSynced) {
+    return { label: 'Listo para Aurora', className: 'bg-emerald-100 text-emerald-800' }
   }
 
-  return story.isInCatalog
-    ? 'Con cambios en este dispositivo'
-    : 'Solo en este dispositivo'
+  const missing = story.totalSegments - story.syncedSegments
+
+  return {
+    label:
+      story.syncedSegments === 0
+        ? 'Faltan marcar los tiempos'
+        : `Faltan ${missing} ${missing === 1 ? 'frase' : 'frases'}`,
+    className: 'bg-amber-100 text-amber-800',
+  }
 }
 
-function formatCreatedAt(value) {
-  if (!value) {
-    return 'Agregado hace poco'
+function getPublishStatus(story) {
+  if (!story.isInCatalog) {
+    return 'Solo en este dispositivo'
   }
 
-  return new Intl.DateTimeFormat('es-ES', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(new Date(value))
+  return story.isLocal ? 'Publicado, con cambios sin publicar' : 'Publicado'
 }
 
 function formatListenCount(value) {
@@ -87,192 +188,100 @@ function formatListenCount(value) {
   return `${count} ${count === 1 ? 'escucha' : 'escuchas'}`
 }
 
-export function HomePage() {
-  const navigate = useNavigate()
-  const { isAdminMode } = useAdminMode()
-  const [stories, setStories] = useState([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState('')
-
-  useEffect(() => {
-    let isMounted = true
-
-    async function loadStories() {
-      setIsLoading(true)
-      setErrorMessage('')
-
-      try {
-        const data = await getAllStoriesWithSegmentStats()
-
-        if (!isMounted) {
-          return
-        }
-
-        setStories(data)
-      } catch (error) {
-        if (isMounted) {
-          setErrorMessage(error.message || 'No se pudo cargar la biblioteca.')
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false)
-        }
-      }
-    }
-
-    loadStories()
-
-    return () => {
-      isMounted = false
-    }
-  }, [])
-
-  if (isLoading) {
-    return (
-      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <p className="text-sm text-slate-600">Cargando biblioteca...</p>
-      </section>
-    )
-  }
-
-  if (errorMessage) {
-    return (
-      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-          {errorMessage}
-        </div>
-      </section>
-    )
-  }
-
-  if (stories.length === 0) {
-    return (
-      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <div className="mx-auto max-w-2xl rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center sm:p-12">
-          <h2 className="text-3xl font-semibold tracking-tight text-slate-900">
-            Todavía no hay cuentos
-          </h2>
-          <p className="mt-3 text-sm text-slate-600 sm:text-base">
-            {isAdminMode
-              ? 'Crea tu primer cuento o abre un archivo .cuento que te hayan pasado.'
-              : 'Abre un archivo .cuento que te hayan pasado para escucharlo.'}
-          </p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
-            {isAdminMode ? (
-              <Link
-                to="/upload"
-                className="inline-flex rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800"
-              >
-                Crear mi primer cuento
-              </Link>
-            ) : null}
-            <OpenStoryFileButton className={secondaryButtonClassName} />
-          </div>
-        </div>
-      </section>
-    )
-  }
+function AdminLibrary({ stories }) {
+  const hiddenCount = stories.filter((story) => !story.isSynced).length
 
   return (
-    <section className="space-y-6">
-      <div className="flex flex-col gap-4 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:flex-row sm:items-end sm:justify-between sm:p-8">
+    <section className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
-            Todos los cuentos
-          </h2>
-          <p className="mt-2 text-sm text-slate-600 sm:text-base">
-            Elige un cuento para escuchar o, si estás en modo admin, para editarlo.
+          <h2 className="text-2xl font-extrabold tracking-tight">Cuentos</h2>
+          <p className="text-sm text-slate-500">
+            {stories.length === 0
+              ? 'Todavía no hay ninguno.'
+              : hiddenCount > 0
+                ? `Aurora ve solo los que están listos (${stories.length - hiddenCount} de ${stories.length}).`
+                : `${stories.length} ${stories.length === 1 ? 'cuento' : 'cuentos'}, todos listos para Aurora.`}
           </p>
         </div>
-
-        <div className="flex flex-wrap items-start gap-3">
-          <OpenStoryFileButton className={secondaryButtonClassName} />
-          {isAdminMode ? (
-            <Link
-              to="/upload"
-              className="inline-flex rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800"
-            >
-              Crear cuento
-            </Link>
-          ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <OpenStoryFileButton />
+          <Link
+            to="/upload"
+            className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+          >
+            <PlusIcon className="h-4 w-4" />
+            Nuevo cuento
+          </Link>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {stories.map((story) => (
-          <article
-            key={story.id}
-            role="button"
-            tabIndex={0}
-            onClick={() => navigate(`/player/${story.id}`)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault()
-                navigate(`/player/${story.id}`)
-              }
-            }}
-            className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-0.5 hover:shadow-md hover:ring-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-300"
-          >
-            <StoryCover
-              src={story.cover_image_url}
-              title={story.title}
-              className="h-48 w-full"
-            />
+      {stories.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
+          <p className="font-semibold text-slate-800">Empezá creando el primer cuento</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Necesitás el audio y el texto. Si alguien te mandó un archivo .cuento,
+            abrilo con el botón de arriba.
+          </p>
+        </div>
+      ) : (
+        <ul className="grid gap-3 md:grid-cols-2">
+          {stories.map((story) => {
+            const syncStatus = getSyncStatus(story)
 
-            <div className="p-5 sm:p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {formatCreatedAt(story.created_at)}
-                  </p>
-                  <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">
-                    {story.title}
-                  </h3>
-                </div>
-
-                <span
-                  className={[
-                    'mt-1 inline-flex h-4 w-4 rounded-full',
-                    story.isSynced ? 'bg-emerald-400' : 'bg-slate-300',
-                  ].join(' ')}
-                  aria-label={story.isSynced ? 'Sincronizado' : 'Sin sincronizar'}
-                  title={story.isSynced ? 'Sincronizado' : 'Sin sincronizar'}
-                />
-              </div>
-
-              <div className="mt-5 flex flex-wrap gap-2 text-sm text-slate-600">
-                <span className="rounded-full bg-slate-100 px-3 py-2 font-medium">
-                  {formatListenCount(story.listen_count)}
-                </span>
-                {isAdminMode && getDeviceBadge(story) ? (
-                  <span className="rounded-full bg-amber-100 px-3 py-2 font-medium text-amber-800">
-                    {getDeviceBadge(story)}
-                  </span>
-                ) : null}
-              </div>
-
-              <div className="mt-6 flex flex-wrap gap-3">
-                <Link
-                  to={`/player/${story.id}`}
-                  onClick={(event) => event.stopPropagation()}
-                  className="inline-flex min-w-28 items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-                >
-                  Escuchar
+            return (
+              <li
+                key={story.id}
+                className="flex gap-4 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200"
+              >
+                <Link to={`/editor/${story.id}`} className="shrink-0">
+                  <StoryCover
+                    src={story.cover_image_url}
+                    title={story.title}
+                    seed={story.id}
+                    className="h-24 w-24 rounded-xl"
+                  />
                 </Link>
-                {isAdminMode ? (
+                <div className="flex min-w-0 flex-1 flex-col">
                   <Link
                     to={`/editor/${story.id}`}
-                    onClick={(event) => event.stopPropagation()}
-                    className="inline-flex min-w-28 items-center justify-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+                    className="truncate font-bold text-slate-900 hover:text-violet-700"
                   >
-                    Editar
+                    {story.title}
                   </Link>
-                ) : null}
-              </div>
-            </div>
-          </article>
-        ))}
-      </div>
+                  <p className="truncate text-sm text-slate-500">
+                    {story.narrator ? `Leído por ${story.narrator}` : 'Sin narrador'}
+                    {' · '}
+                    {formatListenCount(story.listen_count)}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-xs font-semibold">
+                    <span className={['rounded-full px-2 py-1', syncStatus.className].join(' ')}>
+                      {syncStatus.label}
+                    </span>
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
+                      {getPublishStatus(story)}
+                    </span>
+                  </div>
+                  <div className="mt-auto flex gap-2 pt-2 text-sm font-semibold">
+                    <Link
+                      to={`/editor/${story.id}`}
+                      className="rounded-lg bg-slate-900 px-3 py-1.5 text-white transition hover:bg-slate-700"
+                    >
+                      Editar
+                    </Link>
+                    <Link
+                      to={`/player/${story.id}`}
+                      className="rounded-lg px-3 py-1.5 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                    >
+                      Escuchar
+                    </Link>
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </section>
   )
 }

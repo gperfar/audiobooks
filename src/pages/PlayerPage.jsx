@@ -1,392 +1,306 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Howl } from 'howler'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import {
+  HomeIcon,
+  PauseIcon,
+  PencilIcon,
+  PlayIcon,
+  ReplayIcon,
+} from '../components/Icons.jsx'
 import { StoryCover } from '../components/StoryCover.jsx'
 import { useAdminMode } from '../contexts/useAdminMode.js'
+import { useStoryAudio } from '../hooks/useStoryAudio.js'
 import {
   fetchStoryWithSegments,
   incrementStoryListenCount,
 } from '../lib/storyApi.js'
 import { findActiveSegment } from '../utils/editorTiming.js'
-
-function formatTime(value) {
-  if (typeof value !== 'number' || Number.isNaN(value)) {
-    return '--:--'
-  }
-
-  const minutes = Math.floor(value / 60)
-  const seconds = Math.floor(value % 60)
-
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-}
+import { formatTime } from '../utils/formatTime.js'
 
 function getPlaybackPositionKey(storyId) {
   return `story-player-position:${storyId}`
 }
 
 function loadSavedPlaybackPosition(storyId) {
-  if (!storyId) {
+  try {
+    const parsedValue = Number(window.localStorage.getItem(getPlaybackPositionKey(storyId)))
+    return Number.isFinite(parsedValue) ? parsedValue : 0
+  } catch {
     return 0
   }
-
-  const rawValue = window.localStorage.getItem(getPlaybackPositionKey(storyId))
-  const parsedValue = Number(rawValue)
-
-  return Number.isFinite(parsedValue) ? parsedValue : 0
 }
 
-function savePlaybackPosition(storyId, time) {
-  if (!storyId) {
-    return
-  }
+// Keep the screen on while a story plays (where supported).
+function useWakeLock(isActive) {
+  useEffect(() => {
+    if (!isActive || !navigator.wakeLock) {
+      return undefined
+    }
 
-  window.localStorage.setItem(getPlaybackPositionKey(storyId), String(time))
-}
+    let wakeLock = null
+    let isCancelled = false
 
-function formatListenCount(value) {
-  const count = Number(value) || 0
-  return `${count} ${count === 1 ? 'escucha' : 'escuchas'}`
+    navigator.wakeLock
+      .request('screen')
+      .then((lock) => {
+        if (isCancelled) {
+          lock.release()
+        } else {
+          wakeLock = lock
+        }
+      })
+      .catch(() => {})
+
+    return () => {
+      isCancelled = true
+      wakeLock?.release().catch(() => {})
+    }
+  }, [isActive])
 }
 
 export function PlayerPage() {
   const { storyId } = useParams()
   const { isAdminMode } = useAdminMode()
-  const soundRef = useRef(null)
-  const animationFrameRef = useRef(null)
-  const segmentRefs = useRef({})
   const hasCountedListenRef = useRef(false)
 
   const [story, setStory] = useState(null)
-  const [segments, setSegments] = useState([])
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [hasEnded, setHasEnded] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState('')
-
-  const syncedSegments = useMemo(
-    () =>
-      segments.filter((segment) => typeof segment.start_time === 'number'),
-    [segments],
-  )
-
-  const activeSegment = useMemo(
-    () => findActiveSegment(syncedSegments, currentTime),
-    [syncedSegments, currentTime],
-  )
-
-  const visibleActiveSegment = useMemo(() => {
-    if (activeSegment) {
-      return activeSegment
-    }
-
-    if (hasEnded && syncedSegments.length > 0) {
-      return syncedSegments[syncedSegments.length - 1]
-    }
-
-    return null
-  }, [activeSegment, hasEnded, syncedSegments])
+  const [loadError, setLoadError] = useState('')
+  const [initialPosition] = useState(() => loadSavedPlaybackPosition(storyId))
 
   useEffect(() => {
     let isMounted = true
 
-    async function loadStory() {
-      setIsLoading(true)
-      setErrorMessage('')
-
-      try {
-        const data = await fetchStoryWithSegments(storyId)
-
-        if (!isMounted) {
-          return
-        }
-
-        setStory(data)
-        setSegments(data.segments)
-      } catch (error) {
+    fetchStoryWithSegments(storyId)
+      .then((data) => {
         if (isMounted) {
-          setErrorMessage(error.message || 'No se pudo cargar el reproductor del cuento.')
+          setStory(data)
         }
-      } finally {
+      })
+      .catch((error) => {
+        if (isMounted) {
+          setLoadError(error.message || 'No se pudo abrir el cuento.')
+        }
+      })
+      .finally(() => {
         if (isMounted) {
           setIsLoading(false)
         }
-      }
-    }
-
-    loadStory()
+      })
 
     return () => {
       isMounted = false
     }
   }, [storyId])
 
+  const savePosition = useCallback(
+    (time) => {
+      try {
+        window.localStorage.setItem(getPlaybackPositionKey(storyId), String(time))
+      } catch {
+        // Not critical: playback just starts from the beginning next time.
+      }
+    },
+    [storyId],
+  )
+
+  const audio = useStoryAudio(story?.audio_url, {
+    initialPosition,
+    onPositionSave: savePosition,
+  })
+
+  useWakeLock(audio.isPlaying)
+
+  const segments = useMemo(() => story?.segments ?? [], [story])
+  const syncedSegments = useMemo(
+    () => segments.filter((segment) => typeof segment.start_time === 'number'),
+    [segments],
+  )
+  const isSynced = syncedSegments.length > 0
+
+  const activeSegment = findActiveSegment(syncedSegments, audio.currentTime)
+  const visibleSegment =
+    activeSegment ??
+    (audio.hasEnded ? syncedSegments.at(-1) : syncedSegments[0]) ??
+    null
+
   useEffect(() => {
-    if (!story?.audio_url) {
-      return undefined
+    if (!story || !('mediaSession' in navigator)) {
+      return
     }
 
-    const initialPosition = loadSavedPlaybackPosition(storyId)
-    const sound = new Howl({
-      src: [story.audio_url],
-      // Blob URLs have no extension, so Howler needs the format explicitly.
-      format: [story.audio_format],
-      html5: true,
-      onload: () => {
-        const audioDuration = Number(sound.duration() || 0)
-        setDuration(audioDuration)
-
-        if (initialPosition > 0 && initialPosition < audioDuration) {
-          sound.seek(initialPosition)
-          setCurrentTime(initialPosition)
-        }
-      },
-      onloaderror: () => {
-        setErrorMessage('No se pudo cargar el audio del cuento.')
-      },
-      onplay: () => {
-        setIsPlaying(true)
-        setHasEnded(false)
-      },
-      onpause: () => {
-        const pausedAt = Number(sound.seek() || 0)
-        setIsPlaying(false)
-        setCurrentTime(pausedAt)
-        savePlaybackPosition(storyId, pausedAt)
-      },
-      onstop: () => {
-        setIsPlaying(false)
-        setHasEnded(false)
-        setCurrentTime(0)
-        savePlaybackPosition(storyId, 0)
-      },
-      onend: () => {
-        const endedAt = Number(sound.duration() || 0)
-        setIsPlaying(false)
-        setHasEnded(true)
-        setCurrentTime(endedAt)
-        savePlaybackPosition(storyId, endedAt)
-      },
+    navigator.mediaSession.metadata = new window.MediaMetadata({
+      title: story.title,
+      artist: story.narrator ? `Leído por ${story.narrator}` : 'Cuentos de Aurora',
+      artwork: story.cover_image_url ? [{ src: story.cover_image_url }] : [],
     })
+  }, [story])
 
-    soundRef.current = sound
-
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
-      }
-
-      if (soundRef.current) {
-        savePlaybackPosition(storyId, Number(soundRef.current.seek() || 0))
-      }
-
-      sound.unload()
-      soundRef.current = null
-    }
-  }, [story?.audio_url, story?.audio_format, storyId])
-
-  useEffect(() => {
-    if (!isPlaying) {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
-      }
-
-      return undefined
-    }
-
-    function updateAudioTime() {
-      const sound = soundRef.current
-
-      if (!sound) {
-        return
-      }
-
-      const nextTime = Number(sound.seek() || 0)
-      setCurrentTime(nextTime)
-      animationFrameRef.current = requestAnimationFrame(updateAudioTime)
-    }
-
-    animationFrameRef.current = requestAnimationFrame(updateAudioTime)
-
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
-      }
-    }
-  }, [isPlaying])
-
-  useEffect(() => {
-    if (!visibleActiveSegment?.id) {
-      return
-    }
-
-    const element = segmentRefs.current[visibleActiveSegment.id]
-    element?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center',
-    })
-  }, [visibleActiveSegment?.id])
-
-  function handleTogglePlayback() {
-    const sound = soundRef.current
-
-    if (!sound) {
-      return
-    }
-
-    if (sound.playing()) {
-      sound.pause()
-      return
-    }
-
-    if (hasEnded) {
-      sound.seek(0)
-      setCurrentTime(0)
-      setHasEnded(false)
-      savePlaybackPosition(storyId, 0)
-    }
-
-    if (!hasCountedListenRef.current && storyId) {
+  const handleTogglePlayback = useCallback(() => {
+    if (!audio.isPlaying && !hasCountedListenRef.current) {
       hasCountedListenRef.current = true
       const nextListenCount = incrementStoryListenCount(storyId)
-
-      setStory((currentStory) => ({
-        ...currentStory,
-        listen_count: nextListenCount,
-      }))
+      setStory((currentStory) => ({ ...currentStory, listen_count: nextListenCount }))
     }
 
-    sound.play()
-  }
+    audio.toggle()
+  }, [audio, storyId])
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.code === 'Space' && event.target === document.body) {
+        event.preventDefault()
+        handleTogglePlayback()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleTogglePlayback])
 
   if (isLoading) {
+    return <p className="py-24 text-center text-amber-900/60">Abriendo el cuento...</p>
+  }
+
+  if (loadError) {
     return (
-      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <p className="text-sm text-slate-600">Cargando reproductor del cuento...</p>
-      </section>
+      <div className="mx-auto max-w-md space-y-4 px-4 py-24 text-center">
+        <p className="text-lg font-semibold text-slate-800">{loadError}</p>
+        <Link to="/" className="inline-flex rounded-full bg-slate-900 px-5 py-3 font-semibold text-white">
+          Volver a los cuentos
+        </Link>
+      </div>
     )
   }
 
-  if (errorMessage && !story) {
-    return (
-      <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <p className="text-sm text-rose-700">{errorMessage}</p>
-      </section>
-    )
-  }
+  const progress = audio.duration > 0 ? audio.currentTime / audio.duration : 0
+  const playLabel = audio.isPlaying ? 'Pausar' : audio.hasEnded ? 'Escuchar otra vez' : 'Escuchar'
 
   return (
-    <div className="relative -mx-4 min-h-[calc(100vh-12rem)] bg-[radial-gradient(circle_at_top,_#fff7ed,_#fefce8_45%,_#eff6ff)] px-4 pb-36 pt-2 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-      <div className="mx-auto flex min-h-[calc(100vh-16rem)] max-w-5xl flex-col">
-        <section className="mx-auto w-full max-w-3xl text-center">
-          <div className="mb-5 flex justify-center">
-            <StoryCover
-              src={story?.cover_image_url}
-              title={story?.title}
-              className="h-44 w-32 rounded-[2rem] shadow-lg ring-4 ring-white/70 sm:h-56 sm:w-40"
-            />
-          </div>
+    <div
+      className={[
+        'flex flex-col bg-[radial-gradient(circle_at_top,_#fff7ed,_#fef3c7_55%,_#fde68a)]',
+        // In admin mode the shell's top bar takes some height.
+        isAdminMode ? '-mx-4 -mt-6 min-h-[calc(100dvh-3.5rem)] sm:-mx-6' : 'min-h-dvh',
+      ].join(' ')}
+    >
+      <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 pb-6 pt-4 sm:px-6">
+        <div className="flex items-center gap-3 sm:gap-5">
+          {!isAdminMode ? (
+            <Link
+              to="/"
+              aria-label="Volver a los cuentos"
+              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white text-amber-900 shadow-md transition active:scale-90"
+            >
+              <HomeIcon className="h-7 w-7" />
+            </Link>
+          ) : null}
 
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-700">
-            Audiolibros de Aurora
-          </p>
-          <h2 className="mt-3 text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl">
-            {story?.title}
-          </h2>
-          <p className="mt-3 text-base text-slate-600 sm:text-lg">
-            Escucha y sigue cada frase mientras se ilumina.
-          </p>
+          <StoryCover
+            src={story.cover_image_url}
+            title={story.title}
+            seed={story.id}
+            className="h-16 w-16 shrink-0 rounded-2xl shadow-md sm:h-24 sm:w-24"
+          />
 
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-4 text-sm font-medium text-slate-500 sm:text-base">
-            <span>{formatTime(currentTime)}</span>
-            <span className="h-1 w-1 rounded-full bg-slate-300" />
-            <span>{formatTime(duration)}</span>
-            <span className="h-1 w-1 rounded-full bg-slate-300" />
-            <span>{formatListenCount(story?.listen_count)}</span>
+          <div className="min-w-0 flex-1">
+            <h2 className="story-text text-xl font-bold leading-tight text-amber-950 sm:text-3xl">
+              {story.title}
+            </h2>
+            {story.narrator ? (
+              <p className="mt-0.5 text-sm font-semibold text-amber-800 sm:text-base">
+                Leído por {story.narrator}
+              </p>
+            ) : null}
           </div>
 
           {isAdminMode ? (
-            <div className="mt-5">
-              <Link
-                to={storyId ? `/editor/${storyId}` : '/'}
-                className="inline-flex rounded-full bg-white/80 px-4 py-2 text-sm font-medium text-slate-600 shadow-sm ring-1 ring-slate-200 backdrop-blur transition hover:text-slate-900"
+            <Link
+              to={`/editor/${story.id}`}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm"
+            >
+              <PencilIcon className="h-4 w-4" />
+              Editar
+            </Link>
+          ) : null}
+        </div>
+
+        <section className="flex flex-1 items-center justify-center py-8">
+          {isSynced ? (
+            visibleSegment ? (
+              <p
+                key={visibleSegment.id}
+                className="story-text animate-sentence-in max-w-3xl text-center text-[clamp(2rem,7vw,4.5rem)] font-bold leading-snug text-slate-900"
               >
-                Editar
-              </Link>
-            </div>
-          ) : null}
-
-          {errorMessage ? (
-            <div className="mt-5 rounded-3xl border border-rose-200 bg-rose-50/90 p-4 text-sm text-rose-700 shadow-sm">
-              {errorMessage}
-            </div>
-          ) : null}
-        </section>
-
-        <section className="flex flex-1 items-center justify-center py-8 sm:py-12">
-          {syncedSegments.length === 0 ? (
-            <div className="w-full max-w-2xl rounded-[2rem] bg-white/80 p-10 text-center shadow-sm ring-1 ring-amber-100 backdrop-blur">
-              <p className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-                Este cuento todavía no está sincronizado
+                {visibleSegment.text}
               </p>
-              <p className="mt-4 text-base leading-8 text-slate-600 sm:text-lg">
-                Agrega tiempos en el editor antes de usar el reproductor.
-              </p>
-            </div>
+            ) : null
           ) : (
-            <div className="w-full max-w-3xl space-y-7 sm:space-y-9">
-              {segments.length !== syncedSegments.length ? (
-                <p className="text-center text-sm text-slate-500">
-                  Aquí solo se muestran las frases que ya tienen tiempo guardado.
+            <div className="max-w-2xl space-y-3 text-center">
+              {isAdminMode ? (
+                <p className="text-sm font-semibold text-amber-800">
+                  Este cuento todavía no tiene tiempos marcados: se muestra el texto completo.
                 </p>
               ) : null}
-
-              {syncedSegments.map((segment) => {
-                const isActive = visibleActiveSegment?.id === segment.id
-
-                return (
-                  <div
-                    key={segment.id}
-                    ref={(element) => {
-                      if (element) {
-                        segmentRefs.current[segment.id] = element
-                      }
-                    }}
-                    className={[
-                      'rounded-[2rem] px-6 py-5 text-center transition-all duration-300 sm:px-8 sm:py-6',
-                      isActive
-                        ? 'scale-[1.02] bg-white/95 shadow-lg ring-2 ring-amber-200'
-                        : 'bg-transparent',
-                    ].join(' ')}
-                  >
-                    <p
-                      className={[
-                        'mx-auto max-w-3xl text-3xl leading-[1.7] text-slate-700 transition-all duration-300 sm:text-4xl md:text-5xl',
-                        isActive
-                          ? 'font-semibold text-slate-950'
-                          : 'font-medium opacity-85',
-                      ].join(' ')}
-                    >
-                      {segment.text}
-                    </p>
-                  </div>
-                )
-              })}
+              <p className="story-text text-2xl leading-relaxed text-slate-800 sm:text-3xl">
+                {segments.map((segment) => segment.text).join(' ')}
+              </p>
             </div>
           )}
         </section>
-      </div>
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 bg-gradient-to-t from-amber-100 via-amber-100/95 to-transparent px-4 pb-5 pt-10 sm:px-6 lg:px-8">
-        <div className="pointer-events-auto mx-auto flex max-w-3xl items-center justify-center">
-          <button
-            type="button"
-            onClick={handleTogglePlayback}
-            className="inline-flex min-h-16 w-full max-w-md items-center justify-center rounded-full bg-slate-900 px-8 py-5 text-xl font-semibold text-white shadow-xl transition hover:bg-slate-800 sm:min-h-20 sm:text-2xl"
-          >
-            {isPlaying ? 'Pausar cuento' : 'Escuchar cuento'}
-          </button>
+        {audio.errorMessage ? (
+          <p className="mb-4 text-center text-sm font-semibold text-rose-700">{audio.errorMessage}</p>
+        ) : null}
+
+        <div className="space-y-5">
+          {isAdminMode ? (
+            <div className="flex items-center gap-3 text-sm font-semibold tabular-nums text-amber-900/70">
+              <span>{formatTime(audio.currentTime)}</span>
+              <input
+                type="range"
+                min={0}
+                max={audio.duration || 0}
+                step={0.1}
+                value={audio.currentTime}
+                onChange={(event) => audio.seek(Number(event.target.value))}
+                aria-label="Posición del audio"
+                className="flex-1 accent-amber-600"
+              />
+              <span>{formatTime(audio.duration)}</span>
+            </div>
+          ) : (
+            <div className="h-2.5 overflow-hidden rounded-full bg-amber-900/10">
+              <div
+                className="h-full rounded-full bg-amber-500"
+                style={{ width: `${progress * 100}%` }}
+              />
+            </div>
+          )}
+
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={handleTogglePlayback}
+              disabled={!audio.isReady}
+              aria-label={playLabel}
+              className="flex h-24 w-24 items-center justify-center rounded-full bg-rose-500 text-white shadow-xl shadow-rose-500/30 transition active:scale-90 disabled:opacity-50 sm:h-28 sm:w-28"
+            >
+              {audio.isPlaying ? (
+                <PauseIcon className="h-12 w-12" />
+              ) : audio.hasEnded ? (
+                <ReplayIcon className="h-11 w-11" />
+              ) : (
+                <PlayIcon className="ml-1.5 h-12 w-12" />
+              )}
+            </button>
+          </div>
+
+          {isAdminMode ? (
+            <p className="text-center text-xs text-amber-900/60">
+              {story.listen_count} {story.listen_count === 1 ? 'escucha' : 'escuchas'} en este dispositivo
+            </p>
+          ) : null}
         </div>
       </div>
     </div>

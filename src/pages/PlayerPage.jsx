@@ -130,6 +130,8 @@ export function PlayerPage() {
     const initialPosition = loadSavedPlaybackPosition(storyId)
     const sound = new Howl({
       src: [story.audio_url],
+      // Blob URLs have no extension, so Howler needs the format explicitly.
+      format: [story.audio_format],
       html5: true,
       onload: () => {
         const audioDuration = Number(sound.duration() || 0)
@@ -182,7 +184,7 @@ export function PlayerPage() {
       sound.unload()
       soundRef.current = null
     }
-  }, [story?.audio_url, storyId])
+  }, [story?.audio_url, story?.audio_format, storyId])
 
   useEffect(() => {
     if (!isPlaying) {
@@ -247,22 +249,12 @@ export function PlayerPage() {
 
     if (!hasCountedListenRef.current && storyId) {
       hasCountedListenRef.current = true
-      const currentListenCount = Number(story?.listen_count) || 0
+      const nextListenCount = incrementStoryListenCount(storyId)
 
       setStory((currentStory) => ({
         ...currentStory,
-        listen_count: currentListenCount + 1,
+        listen_count: nextListenCount,
       }))
-
-      incrementStoryListenCount(storyId, currentListenCount).catch((error) => {
-        setStory((currentStory) => ({
-          ...currentStory,
-          listen_count: currentListenCount,
-        }))
-        setErrorMessage(
-          error.message || 'No se pudo guardar el contador de escuchas.',
-        )
-      })
     }
 
     sound.play()

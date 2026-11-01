@@ -5,12 +5,12 @@ import { StoryCover } from '../components/StoryCover.jsx'
 import { useAdminMode } from '../contexts/useAdminMode.js'
 import {
   deleteStory,
+  downloadStoryFile,
   fetchStoryWithSegments,
   saveSegmentsTiming,
   updateSegmentText,
   updateStoryCoverImage,
   updateStoryTitle,
-  uploadCoverImage,
 } from '../lib/storyApi.js'
 import {
   findActiveSegment,
@@ -50,6 +50,7 @@ export function EditorPage() {
   const [titleDraft, setTitleDraft] = useState('')
   const [isSavingTitle, setIsSavingTitle] = useState(false)
   const [isDeletingStory, setIsDeletingStory] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
   const [editingSegmentId, setEditingSegmentId] = useState(null)
 
   const activeSegment = useMemo(
@@ -99,6 +100,8 @@ export function EditorPage() {
 
     const sound = new Howl({
       src: [story.audio_url],
+      // Blob URLs have no extension, so Howler needs the format explicitly.
+      format: [story.audio_format],
       html5: true,
       onplay: () => {
         setIsPlaying(true)
@@ -124,7 +127,7 @@ export function EditorPage() {
       sound.unload()
       soundRef.current = null
     }
-  }, [story?.audio_url])
+  }, [story?.audio_url, story?.audio_format])
 
   useEffect(() => {
     if (!isPlaying) {
@@ -273,7 +276,9 @@ export function EditorPage() {
     }
 
     const confirmed = window.confirm(
-      '¿Seguro que quieres borrar este cuento? Esta acción no se puede deshacer.',
+      story?.isInCatalog
+        ? '¿Descartar los cambios hechos en este dispositivo? Volverás a ver la versión publicada.'
+        : '¿Seguro que quieres borrar este cuento de este dispositivo? Si no lo descargaste como .cuento, no se puede recuperar.',
     )
 
     if (!confirmed) {
@@ -314,12 +319,13 @@ export function EditorPage() {
     setSaveMessage('')
 
     try {
-      const updatedSegment = await updateSegmentText(segmentId, trimmedText)
+      const updatedSegment = await updateSegmentText(storyId, segmentId, trimmedText)
       setSegments((currentSegments) =>
         currentSegments.map((segment) =>
           segment.id === segmentId ? { ...segment, ...updatedSegment } : segment,
         ),
       )
+      setStory((currentStory) => ({ ...currentStory, isLocal: true }))
       setEditingSegmentId(null)
       setSaveMessage('Texto de la frase actualizado.')
     } catch (error) {
@@ -337,8 +343,7 @@ export function EditorPage() {
     setSaveMessage('')
 
     try {
-      const coverImageUrl = await uploadCoverImage(coverImageFile)
-      const updatedStory = await updateStoryCoverImage(storyId, coverImageUrl)
+      const updatedStory = await updateStoryCoverImage(storyId, coverImageFile)
 
       setStory((currentStory) => ({
         ...currentStory,
@@ -360,12 +365,27 @@ export function EditorPage() {
     setSaveMessage('')
 
     try {
-      await saveSegmentsTiming(segments)
+      await saveSegmentsTiming(storyId, segments)
+      setStory((currentStory) => ({ ...currentStory, isLocal: true }))
       setSaveMessage('Tiempos guardados.')
     } catch (error) {
       setErrorMessage(error.message || 'No se pudieron guardar los tiempos.')
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  async function handleDownload() {
+    setIsDownloading(true)
+    setErrorMessage('')
+    setSaveMessage('')
+
+    try {
+      await downloadStoryFile(storyId)
+    } catch (error) {
+      setErrorMessage(error.message || 'No se pudo generar el archivo .cuento.')
+    } finally {
+      setIsDownloading(false)
     }
   }
 
@@ -426,13 +446,35 @@ export function EditorPage() {
             </button>
             <button
               type="button"
-              onClick={handleDeleteStory}
-              disabled={isDeletingStory}
-              className="inline-flex rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-rose-300"
+              onClick={handleDownload}
+              disabled={isDownloading}
+              className="inline-flex rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
             >
-              {isDeletingStory ? 'Borrando...' : 'Borrar cuento'}
+              {isDownloading ? 'Preparando archivo...' : 'Descargar .cuento'}
             </button>
+            {!story?.isInCatalog || story?.isLocal ? (
+              <button
+                type="button"
+                onClick={handleDeleteStory}
+                disabled={isDeletingStory}
+                className="inline-flex rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-rose-300"
+              >
+                {isDeletingStory
+                  ? 'Borrando...'
+                  : story?.isInCatalog
+                    ? 'Descartar cambios'
+                    : 'Borrar cuento'}
+              </button>
+            ) : null}
           </div>
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          {story?.isInCatalog
+            ? story?.isLocal
+              ? 'Este cuento está publicado y tiene cambios guardados solo en este dispositivo. Para publicarlos, descarga el .cuento y reemplaza el archivo en public/cuentos.'
+              : 'Este cuento está publicado. Lo que cambies se guarda en este dispositivo; para publicarlo, descarga el .cuento y reemplaza el archivo en public/cuentos.'
+            : 'Este cuento existe solo en este dispositivo. Descarga el .cuento para guardarlo, compartirlo o publicarlo en public/cuentos.'}
         </div>
 
         <p className="mt-5 text-sm text-slate-600 sm:text-base">

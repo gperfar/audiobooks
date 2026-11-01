@@ -1,13 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import {
-  createSegments,
-  createStory,
-  uploadAudioFile,
-  uploadCoverImage,
-} from '../lib/storyApi.js'
+import { createStory } from '../lib/storyApi.js'
 import { useAdminMode } from '../contexts/useAdminMode.js'
-import { isSupabaseConfigured } from '../lib/supabase.js'
 import { splitStoryIntoSentences } from '../utils/sentenceSplit.js'
 
 const emptyForm = {
@@ -82,18 +76,13 @@ export function UploadPage() {
     setIsSubmitting(true)
 
     try {
-      const audioUrl = await uploadAudioFile(formData.audioFile)
-      const coverImageUrl = formData.coverImageFile
-        ? await uploadCoverImage(formData.coverImageFile)
-        : null
-
       const story = await createStory({
         title: formData.title.trim(),
-        audioUrl,
-        coverImageUrl,
+        audioFile: formData.audioFile,
+        coverImageFile: formData.coverImageFile,
+        sentences: sentencePreview,
       })
 
-      await createSegments(story.id, sentencePreview)
       setFormData(emptyForm)
       navigate(`/editor/${story.id}`)
     } catch (error) {
@@ -107,21 +96,14 @@ export function UploadPage() {
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,24rem)]">
       <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-6">
         <div className="mb-6">
-          <h2 className="text-2xl font-semibold tracking-tight">Subir un nuevo cuento</h2>
+          <h2 className="text-2xl font-semibold tracking-tight">Crear un nuevo cuento</h2>
           <p className="mt-2 text-sm text-slate-600 sm:text-base">
-            Agrega un título, sube el audio y pega el cuento completo. La app
+            Agrega un título, elige el audio y pega el cuento completo. La app
             separará el texto en frases para sincronizarlo en la siguiente pantalla.
+            Todo se guarda en este dispositivo hasta que descargues el archivo
+            .cuento desde el editor.
           </p>
         </div>
-
-        {!isSupabaseConfigured ? (
-          <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Supabase todavía no está configurado. Agrega `VITE_SUPABASE_URL`,
-            `VITE_SUPABASE_ANON_KEY`, y opcionalmente `VITE_SUPABASE_AUDIO_BUCKET`
-            y `VITE_SUPABASE_COVER_BUCKET` en tu archivo local `.env` antes de
-            enviar subidas.
-          </div>
-        ) : null}
 
         {errorMessage ? (
           <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
@@ -187,7 +169,7 @@ export function UploadPage() {
 
           <button
             type="submit"
-            disabled={isSubmitting || !isSupabaseConfigured}
+            disabled={isSubmitting}
             className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 sm:w-auto"
           >
             {isSubmitting ? 'Guardando cuento...' : 'Crear cuento y continuar'}
@@ -198,7 +180,7 @@ export function UploadPage() {
       <aside className="rounded-3xl bg-slate-900 p-5 text-white shadow-sm sm:p-6">
         <h2 className="text-xl font-semibold tracking-tight">Vista previa de frases</h2>
         <p className="mt-2 text-sm text-slate-300">
-          Esta es la lista de segmentos que se creará en Supabase.
+          Esta es la lista de segmentos que tendrá el cuento.
         </p>
 
         <div className="mt-6 rounded-3xl bg-white/8 p-4">

@@ -1,8 +1,74 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { StoryCover } from '../components/StoryCover.jsx'
 import { useAdminMode } from '../contexts/useAdminMode.js'
-import { getAllStoriesWithSegmentStats } from '../lib/storyApi.js'
+import {
+  getAllStoriesWithSegmentStats,
+  importStoryFile,
+} from '../lib/storyApi.js'
+
+function OpenStoryFileButton({ className }) {
+  const navigate = useNavigate()
+  const inputRef = useRef(null)
+  const [isImporting, setIsImporting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
+
+  async function handleFileChange(event) {
+    const [file] = event.target.files ?? []
+    event.target.value = ''
+
+    if (!file) {
+      return
+    }
+
+    setIsImporting(true)
+    setErrorMessage('')
+
+    try {
+      const story = await importStoryFile(file)
+      navigate(`/player/${story.id}`)
+    } catch (error) {
+      setErrorMessage(error.message || 'No se pudo abrir el archivo.')
+      setIsImporting(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {/* No accept filter: iOS greys out unknown extensions like .cuento. */}
+      <input
+        ref={inputRef}
+        type="file"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={isImporting}
+        className={className}
+      >
+        {isImporting ? 'Abriendo...' : 'Abrir archivo .cuento'}
+      </button>
+      {errorMessage ? (
+        <p className="text-sm text-rose-700">{errorMessage}</p>
+      ) : null}
+    </div>
+  )
+}
+
+const secondaryButtonClassName =
+  'inline-flex rounded-2xl border border-slate-200 bg-white px-5 py-4 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60'
+
+function getDeviceBadge(story) {
+  if (!story.isLocal) {
+    return null
+  }
+
+  return story.isInCatalog
+    ? 'Con cambios en este dispositivo'
+    : 'Solo en este dispositivo'
+}
 
 function formatCreatedAt(value) {
   if (!value) {
@@ -87,14 +153,21 @@ export function HomePage() {
             Todavía no hay cuentos
           </h2>
           <p className="mt-3 text-sm text-slate-600 sm:text-base">
-            Sube tu primer cuento para empezar a sincronizarlo y escucharlo.
+            {isAdminMode
+              ? 'Crea tu primer cuento o abre un archivo .cuento que te hayan pasado.'
+              : 'Abre un archivo .cuento que te hayan pasado para escucharlo.'}
           </p>
-          <Link
-            to="/upload"
-            className="mt-6 inline-flex rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800"
-          >
-            Subir mi primer cuento
-          </Link>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            {isAdminMode ? (
+              <Link
+                to="/upload"
+                className="inline-flex rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800"
+              >
+                Crear mi primer cuento
+              </Link>
+            ) : null}
+            <OpenStoryFileButton className={secondaryButtonClassName} />
+          </div>
         </div>
       </section>
     )
@@ -112,14 +185,17 @@ export function HomePage() {
           </p>
         </div>
 
-        {isAdminMode ? (
-          <Link
-            to="/upload"
-            className="inline-flex rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800"
-          >
-            Subir cuento
-          </Link>
-        ) : null}
+        <div className="flex flex-wrap items-start gap-3">
+          <OpenStoryFileButton className={secondaryButtonClassName} />
+          {isAdminMode ? (
+            <Link
+              to="/upload"
+              className="inline-flex rounded-2xl bg-slate-900 px-5 py-4 text-base font-semibold text-white transition hover:bg-slate-800"
+            >
+              Crear cuento
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -168,6 +244,11 @@ export function HomePage() {
                 <span className="rounded-full bg-slate-100 px-3 py-2 font-medium">
                   {formatListenCount(story.listen_count)}
                 </span>
+                {isAdminMode && getDeviceBadge(story) ? (
+                  <span className="rounded-full bg-amber-100 px-3 py-2 font-medium text-amber-800">
+                    {getDeviceBadge(story)}
+                  </span>
+                ) : null}
               </div>
 
               <div className="mt-6 flex flex-wrap gap-3">

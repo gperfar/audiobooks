@@ -83,7 +83,7 @@ export function AppShell({ children }) {
                     Cuentos para leer y escuchar
                   </h1>
                   <p className="mt-2 max-w-2xl text-sm text-slate-600 sm:text-base">
-                    Sube un cuento, separa el texto por frases y sincronízalo con
+                    Crea un cuento, separa el texto por frases y sincronízalo con
                     el audio para acompañar la lectura.
                   </p>
                 </div>
@@ -95,7 +95,7 @@ export function AppShell({ children }) {
                 </NavLink>
                 {isAdminMode ? (
                   <NavLink to="/upload" className={navLinkClassName}>
-                    Subir cuento
+                    Crear cuento
                   </NavLink>
                 ) : null}
                 <AdminModeToggle

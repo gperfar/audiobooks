@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
 import {
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import path from 'node:path'
@@ -24,14 +26,40 @@ export const catalogDirectory = fileURLToPath(
 const coversDirectory = path.join(catalogDirectory, 'portadas')
 const indexPath = path.join(catalogDirectory, 'index.json')
 
+// Covers are updated in place instead of regenerating the folder: the Vite dev
+// server only serves public files it has seen, and files recreated during
+// startup can be missed.
+function writeCoverIfChanged(coverFileName, bytes) {
+  const coverPath = path.join(coversDirectory, coverFileName)
+
+  if (existsSync(coverPath) && readFileSync(coverPath).equals(Buffer.from(bytes))) {
+    return
+  }
+
+  mkdirSync(coversDirectory, { recursive: true })
+  writeFileSync(coverPath, bytes)
+}
+
+function removeStaleCovers(coverFileNames) {
+  if (!existsSync(coversDirectory) || !statSync(coversDirectory).isDirectory()) {
+    return
+  }
+
+  for (const fileName of readdirSync(coversDirectory)) {
+    if (!coverFileNames.has(fileName)) {
+      rmSync(path.join(coversDirectory, fileName), { force: true })
+    }
+  }
+}
+
 export function buildCuentosCatalog() {
   mkdirSync(catalogDirectory, { recursive: true })
-  rmSync(coversDirectory, { recursive: true, force: true })
 
   const fileNames = readdirSync(catalogDirectory)
     .filter((fileName) => fileName.endsWith('.cuento'))
     .sort()
   const storiesById = new Map()
+  const coverFileNames = new Set()
   const errors = []
 
   for (const fileName of fileNames) {
@@ -68,8 +96,8 @@ export function buildCuentosCatalog() {
 
     if (cover) {
       const coverFileName = `${manifest.id}.${getFileExtension(cover.name)}`
-      mkdirSync(coversDirectory, { recursive: true })
-      writeFileSync(path.join(coversDirectory, coverFileName), cover.bytes)
+      writeCoverIfChanged(coverFileName, cover.bytes)
+      coverFileNames.add(coverFileName)
       coverPath = `cuentos/portadas/${coverFileName}?v=${version}`
     }
 
@@ -85,6 +113,8 @@ export function buildCuentosCatalog() {
       ...getSegmentStats(manifest.segments),
     })
   }
+
+  removeStaleCovers(coverFileNames)
 
   // Drop the internal fileName (used only for the duplicate warnings).
   const stories = [...storiesById.values()].map((story) => {

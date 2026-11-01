@@ -81,7 +81,7 @@ function AuroraLibrary({ stories }) {
   }
 
   return (
-    <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 lg:grid-cols-4">
+    <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 lg:grid-cols-4 short:grid-cols-4 short:gap-4">
       {stories.map((story) => (
         <li key={story.id}>
           <Link
@@ -94,8 +94,8 @@ function AuroraLibrary({ stories }) {
               seed={story.id}
               className="aspect-square w-full"
             />
-            <div className="px-3 pb-4 pt-3 sm:px-4">
-              <p className="story-text text-lg font-bold leading-snug text-slate-900 sm:text-xl">
+            <div className="px-3 pb-4 pt-3 sm:px-4 short:pb-3 short:pt-2">
+              <p className="story-text text-lg font-bold leading-snug text-slate-900 sm:text-xl short:text-base">
                 {story.title}
               </p>
               {story.narrator ? (

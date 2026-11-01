@@ -2,11 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 // Shared audio playback for the player and the editor. currentTime is updated
 // every animation frame while playing so sentence highlighting stays in sync.
-export function useStoryAudio(audioUrl, { initialPosition = 0, onPositionSave } = {}) {
+export function useStoryAudio(audioUrl) {
   const audioRef = useRef(null)
   const animationFrameRef = useRef(null)
-  const onPositionSaveRef = useRef(onPositionSave)
-  const initialPositionRef = useRef(initialPosition)
 
   const [isReady, setIsReady] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -14,10 +12,6 @@ export function useStoryAudio(audioUrl, { initialPosition = 0, onPositionSave } 
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [errorMessage, setErrorMessage] = useState('')
-
-  useEffect(() => {
-    onPositionSaveRef.current = onPositionSave
-  }, [onPositionSave])
 
   useEffect(() => {
     if (!audioUrl) {
@@ -28,21 +22,9 @@ export function useStoryAudio(audioUrl, { initialPosition = 0, onPositionSave } 
     audio.preload = 'auto'
     audioRef.current = audio
 
-    function savePosition(time) {
-      onPositionSaveRef.current?.(time)
-    }
-
     function handleLoadedMetadata() {
-      const audioDuration = Number(audio.duration) || 0
-      const startAt = initialPositionRef.current
-
-      setDuration(audioDuration)
+      setDuration(Number(audio.duration) || 0)
       setIsReady(true)
-
-      if (startAt > 0 && startAt < audioDuration - 0.5) {
-        audio.currentTime = startAt
-        setCurrentTime(startAt)
-      }
     }
 
     function handlePlay() {
@@ -53,17 +35,12 @@ export function useStoryAudio(audioUrl, { initialPosition = 0, onPositionSave } 
     function handlePause() {
       setIsPlaying(false)
       setCurrentTime(audio.currentTime)
-
-      if (!audio.ended) {
-        savePosition(audio.currentTime)
-      }
     }
 
     function handleEnded() {
       setIsPlaying(false)
       setHasEnded(true)
       setCurrentTime(audio.duration)
-      savePosition(0)
     }
 
     function handleError() {
@@ -77,10 +54,6 @@ export function useStoryAudio(audioUrl, { initialPosition = 0, onPositionSave } 
     audio.addEventListener('error', handleError)
 
     return () => {
-      if (!audio.paused && !audio.ended) {
-        savePosition(audio.currentTime)
-      }
-
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata)
       audio.removeEventListener('play', handlePlay)
       audio.removeEventListener('pause', handlePause)

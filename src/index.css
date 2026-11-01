@@ -3,6 +3,9 @@
 @import '@fontsource/andika/latin-700.css';
 @import "tailwindcss";
 
+/* Phone held sideways: little height, so layouts go side by side. */
+@custom-variant short (@media (orientation: landscape) and (max-height: 500px));
+
 :root {
   color: #0f172a;
   background-color: #f8fafc;

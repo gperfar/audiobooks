@@ -73,9 +73,9 @@ export function AppShell({ children }) {
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(circle_at_top,_#fff7ed,_#fef3c7_60%,_#fde68a)] text-slate-900">
-      <div className="mx-auto w-full max-w-6xl px-4 pb-12 pt-4 sm:px-6">
-        <header className="mb-4 flex items-center justify-between gap-3">
-          <h1 className="story-text text-3xl font-bold tracking-tight text-amber-950 sm:text-4xl">
+      <div className="mx-auto w-full max-w-6xl px-4 pb-12 pt-4 sm:px-6 short:pt-2">
+        <header className="mb-4 flex items-center justify-between gap-3 short:mb-3">
+          <h1 className="story-text text-3xl font-bold tracking-tight text-amber-950 sm:text-4xl short:text-2xl">
             Cuentos de Aurora
           </h1>
           <AdminGate />

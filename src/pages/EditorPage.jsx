@@ -8,6 +8,7 @@ import {
   PauseIcon,
   PencilIcon,
   PlayIcon,
+  TrashIcon,
 } from '../components/Icons.jsx'
 import { PublishPanel } from '../components/PublishPanel.jsx'
 import { StoryCover } from '../components/StoryCover.jsx'
@@ -15,8 +16,7 @@ import { useStoryAudio } from '../hooks/useStoryAudio.js'
 import {
   deleteStory,
   fetchStoryWithSegments,
-  saveSegmentsTiming,
-  updateSegmentText,
+  saveSegments,
   updateStoryAudio,
   updateStoryCoverImage,
   updateStoryDetails,
@@ -24,6 +24,8 @@ import {
 import {
   findActiveSegment,
   getNextSegmentIndex,
+  mergeSegmentWithNext,
+  removeSegment,
   updateSegmentTiming,
 } from '../utils/editorTiming.js'
 import { formatPreciseTime, formatTime } from '../utils/formatTime.js'
@@ -77,7 +79,7 @@ function useAutosave(save, delay) {
 }
 
 // Mounted fresh each time editing starts, so drafts start from current values.
-function SentenceEditor({ segment, index, onSave, onCancel, rowRef }) {
+function SentenceEditor({ segment, index, onSave, onCancel, onMerge, onRemove, rowRef }) {
   const [textDraft, setTextDraft] = useState(segment.text)
   const [timeDraft, setTimeDraft] = useState(segment.start_time ?? '')
 
@@ -126,6 +128,29 @@ function SentenceEditor({ segment, index, onSave, onCancel, rowRef }) {
             </button>
           </div>
         </div>
+        {onMerge || onRemove ? (
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 border-t border-slate-100 pt-3">
+            {onMerge ? (
+              <button
+                type="button"
+                onClick={onMerge}
+                className="text-sm font-semibold text-violet-700 hover:text-violet-900"
+              >
+                Unir con la siguiente
+              </button>
+            ) : null}
+            {onRemove ? (
+              <button
+                type="button"
+                onClick={onRemove}
+                className="inline-flex items-center gap-1 text-sm font-semibold text-rose-600 hover:text-rose-800"
+              >
+                <TrashIcon className="h-4 w-4" />
+                Borrar frase
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </li>
   )
 }
@@ -140,6 +165,8 @@ function SentenceRow({
   onStartEditing,
   onSave,
   onCancel,
+  onMerge,
+  onRemove,
   rowRef,
 }) {
   const isMarked = typeof segment.start_time === 'number'
@@ -151,6 +178,8 @@ function SentenceRow({
         index={index}
         onSave={onSave}
         onCancel={onCancel}
+        onMerge={onMerge}
+        onRemove={onRemove}
         rowRef={rowRef}
       />
     )
@@ -275,7 +304,7 @@ export function EditorPage() {
 
   const scheduleTimingSave = useAutosave(
     useCallback(
-      (nextSegments) => runSave(() => saveSegmentsTiming(storyId, nextSegments)),
+      (nextSegments) => runSave(() => saveSegments(storyId, nextSegments)),
       [runSave, storyId],
     ),
     400,
@@ -431,12 +460,11 @@ export function EditorPage() {
     setEditingIndex(null)
 
     if (text !== segment.text) {
-      setSegments((currentSegments) =>
+      changeSegments((currentSegments) =>
         currentSegments.map((current, currentIndex) =>
           currentIndex === index ? { ...current, text } : current,
         ),
       )
-      runSave(() => updateSegmentText(storyId, segment.id, text))
     }
 
     if (startTime !== segment.start_time && !Number.isNaN(startTime)) {
@@ -448,6 +476,22 @@ export function EditorPage() {
           : updateSegmentTiming(currentSegments, index, startTime),
       )
     }
+  }
+
+  function handleSegmentMerge(index) {
+    setEditingIndex(null)
+    setLockedNextIndex(null)
+    changeSegments((currentSegments) => mergeSegmentWithNext(currentSegments, index))
+  }
+
+  function handleSegmentRemove(index) {
+    if (!window.confirm(`¿Borrar la frase ${index + 1}?`)) {
+      return
+    }
+
+    setEditingIndex(null)
+    setLockedNextIndex(null)
+    changeSegments((currentSegments) => removeSegment(currentSegments, index))
   }
 
   async function handleDelete() {
@@ -578,6 +622,10 @@ export function EditorPage() {
                 onStartEditing={() => setEditingIndex(index)}
                 onSave={(changes) => handleSegmentSave(index, changes)}
                 onCancel={() => setEditingIndex(null)}
+                onMerge={
+                  index < segments.length - 1 ? () => handleSegmentMerge(index) : null
+                }
+                onRemove={segments.length > 1 ? () => handleSegmentRemove(index) : null}
                 rowRef={(element) => {
                   rowRefs.current[segment.id] = element
                 }}

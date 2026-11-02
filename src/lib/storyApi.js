@@ -402,27 +402,15 @@ export async function updateStoryAudio(storyId, audioFile) {
   }
 }
 
-export async function updateSegmentText(storyId, segmentId, text) {
-  const segmentIndex = Number(segmentId)
-
-  await updateStoryRecord(storyId, ({ manifest }) => ({
+// Replaces the whole sentence list (text and timings), so sentences can be
+// edited, merged or removed in one save.
+export async function saveSegments(storyId, segments) {
+  await updateStoryRecord(storyId, () => ({
     manifest: {
-      segments: manifest.segments.map((segment, index) =>
-        index === segmentIndex ? { ...segment, text } : segment,
-      ),
-    },
-  }))
-
-  return { id: segmentId, text }
-}
-
-export async function saveSegmentsTiming(storyId, segments) {
-  await updateStoryRecord(storyId, ({ manifest }) => ({
-    manifest: {
-      segments: manifest.segments.map((segment, index) => ({
-        ...segment,
-        start: segments[index]?.start_time ?? null,
-        end: segments[index]?.end_time ?? null,
+      segments: segments.map((segment) => ({
+        text: segment.text,
+        start: segment.start_time ?? null,
+        end: segment.end_time ?? null,
       })),
     },
   }))
